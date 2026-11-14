@@ -14,7 +14,9 @@ pip install -r requirements.txt
 python -m uvicorn app:app --reload
 ```
 
-Άνοιξε http://localhost:8000
+Άνοιξε http://localhost:8000 για το dashboard (ή /chat για σκέτο το chat).
+
+Με simulated vitals εμφανίζονται πάνω δεξιά τα demo σενάρια: Ξεκούραση / Περπάτημα / Τρέξιμο στον ήλιο.
 
 Προαιρετικά: `LAT` / `LON` για τοποθεσία (default Αθήνα), `CHAT_MODEL` για άλλο μοντέλο.
 
@@ -24,6 +26,7 @@ python -m uvicorn app:app --reload
 |---|---|
 | `POST /api/vitals` | Το ρολόι στέλνει `{"heart_rate": 95, "spo2": 98, "skin_temp": 34.2, "steps": 4200}` |
 | `GET /api/context` | Τρέχοντα vitals + ηλιακά δεδομένα + σκορ κινδύνου (χρήσιμο και για το dashboard) |
+| `POST /api/scenario` | `{"name": "rest" \| "walk" \| "run_sun"}` αλλάζει το demo σενάριο |
 | `POST /api/chat` | `{"message": "...", "history": [...]}` → `{"reply": "...", "context": {...}}` |
 
 Αν το ρολόι δεν έχει στείλει τίποτα τα τελευταία 2 λεπτά, χρησιμοποιούνται simulated vitals.

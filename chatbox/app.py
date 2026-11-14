@@ -4,7 +4,9 @@ Chatbot backend για το NASA Space Apps project.
 - POST /api/vitals : το ρολόι (ή ο simulator) στέλνει τα τελευταία vitals
 - GET  /api/context: τι "βλέπει" τώρα το bot (vitals + ηλιακή ακτινοβολία)
 - POST /api/chat   : ερώτηση χρήστη -> απάντηση από το LLM με βάση το context
-- GET  /           : το chat box (static/chat.html)
+- POST /api/scenario: αλλάζει το demo σενάριο (rest / walk / run_sun)
+- GET  /           : το κεντρικό dashboard (static/dashboard.html)
+- GET  /chat       : μόνο το chat box (static/chat.html)
 
 Τρέξιμο:
     pip install -r requirements.txt
@@ -13,6 +15,7 @@ Chatbot backend για το NASA Space Apps project.
     -> άνοιξε http://localhost:8000
 """
 
+import math
 import os
 import random
 import time
@@ -53,15 +56,49 @@ class Vitals(BaseModel):
 latest_vitals: Vitals | None = None
 
 
+# Simulator ρολογιού με σενάρια για το demo. Οι τιμές κινούνται ομαλά προς
+# τον στόχο του σεναρίου (όπως ένα πραγματικό σώμα), όχι τυχαία πηδήματα.
+SCENARIOS = {
+    #            παλμοί, SpO2, θερμ. δέρματος, βήματα/δευτ., UV/θερμ. αέρα override
+    "rest":    dict(hr=72,  spo2=98.0, skin=33.6, spm=0.0, solar=None),
+    "walk":    dict(hr=98,  spo2=97.5, skin=34.6, spm=1.8, solar=None),
+    "run_sun": dict(hr=152, spo2=95.5, skin=37.4, spm=2.8,
+                    solar={"uv_index": 9.2, "air_temp_c": 34.5}),
+}
+sim = {"scenario": "rest", "hr": 72.0, "spo2": 98.0, "skin": 33.6,
+       "steps": 4200.0, "t": time.time()}
+
+
 def simulated_vitals() -> Vitals:
     """Ψεύτικα vitals μέχρι να συνδεθεί το πραγματικό ρολόι."""
+    now = time.time()
+    dt = min(now - sim["t"], 30)
+    sim["t"] = now
+    target = SCENARIOS[sim["scenario"]]
+    a = 1 - math.exp(-dt / 15)  # ~15 δευτ. για να "φτάσει" το σώμα στον στόχο
+    sim["hr"] += (target["hr"] - sim["hr"]) * a + random.gauss(0, 1.2)
+    sim["spo2"] += (target["spo2"] - sim["spo2"]) * a + random.gauss(0, 0.1)
+    sim["skin"] += (target["skin"] - sim["skin"]) * a + random.gauss(0, 0.03)
+    sim["steps"] += target["spm"] * dt
     return Vitals(
-        heart_rate=round(random.gauss(88, 10)),
-        spo2=round(random.uniform(95, 99), 1),
-        skin_temp=round(random.uniform(33.5, 36.5), 1),
-        steps=random.randint(2000, 9000),
-        timestamp=time.time(),
+        heart_rate=round(sim["hr"]),
+        spo2=round(min(sim["spo2"], 100), 1),
+        skin_temp=round(sim["skin"], 1),
+        steps=int(sim["steps"]),
+        timestamp=now,
     )
+
+
+class Scenario(BaseModel):
+    name: str
+
+
+@app.post("/api/scenario")
+def set_scenario(s: Scenario):
+    if s.name not in SCENARIOS:
+        raise HTTPException(400, f"Άγνωστο σενάριο. Διαθέσιμα: {list(SCENARIOS)}")
+    sim["scenario"] = s.name
+    return {"ok": True, "scenario": s.name}
 
 
 @app.post("/api/vitals")
@@ -148,7 +185,7 @@ def risk_score(v: Vitals, s: dict) -> dict:
     if (s.get("air_temp_c") or 0) >= 32:
         score += 15; reasons.append(f"ζέστη ({s['air_temp_c']}°C)")
     if (v.heart_rate or 0) >= 110:
-        score += 20; reasons.append(f"αυξημένοι παλμοί ({v.heart_rate} bpm)")
+        score += 20; reasons.append(f"αυξημένοι παλμοί ({v.heart_rate:.0f} bpm)")
     if (v.skin_temp or 0) >= 37:
         score += 15; reasons.append(f"υψηλή θερμοκρασία δέρματος ({v.skin_temp}°C)")
     if v.spo2 and v.spo2 < 94:
@@ -161,10 +198,15 @@ def risk_score(v: Vitals, s: dict) -> dict:
 @app.get("/api/context")
 def get_context():
     v, simulated = current_vitals()
-    s = solar_data()
+    s = dict(solar_data())
+    override = SCENARIOS[sim["scenario"]]["solar"] if simulated else None
+    if override:  # demo σενάριο "τρέξιμο στον ήλιο": μεσημεριανός ήλιος
+        s.update(override)
+        s["source"] = "demo scenario (" + s.get("source", "") + ")"
     return {
         "vitals": v.model_dump(),
         "vitals_simulated": simulated,
+        "scenario": sim["scenario"] if simulated else None,
         "solar": s,
         "risk": risk_score(v, s),
     }
@@ -230,5 +272,10 @@ def chat(req: ChatRequest):
 
 
 @app.get("/")
-def index():
+def dashboard():
+    return FileResponse(STATIC / "dashboard.html")
+
+
+@app.get("/chat")
+def chat_page():
     return FileResponse(STATIC / "chat.html")
