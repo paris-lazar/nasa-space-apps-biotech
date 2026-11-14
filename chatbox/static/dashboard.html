@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SolarGuard – Dashboard</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #111110; --surface-1: #1a1a19; --surface-2: #232321; --border: #2e2e2b;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8a897f;
+    --series-1: #3987e5; --accent: #fab219;
+    --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+    --grid: #2b2b28;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         background: var(--bg); color: var(--text-primary); }
+  .app { display: grid; grid-template-columns: 1fr 380px; gap: 16px; padding: 16px;
+         height: 100vh; }
+  @media (max-width: 1000px) { .app { grid-template-columns: 1fr; height: auto; } .chat { height: 600px; } }
+  .main { display: flex; flex-direction: column; gap: 16px; overflow-y: auto; min-width: 0; }
+
+  /* Header */
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 20px; letter-spacing: .2px; }
+  header h1 span { color: var(--accent); }
+  .badges { display: flex; gap: 8px; flex-wrap: wrap; }
+  .badge { font-size: 12px; color: var(--text-secondary); background: var(--surface-1);
+           border: 1px solid var(--border); padding: 4px 10px; border-radius: 999px; }
+  .badge b { color: var(--text-primary); font-weight: 600; }
+  .scenarios { margin-left: auto; display: flex; background: var(--surface-1);
+               border: 1px solid var(--border); border-radius: 10px; padding: 3px; gap: 2px; }
+  .scenarios button { background: transparent; border: 0; color: var(--text-secondary);
+                      padding: 6px 12px; border-radius: 7px; cursor: pointer; font-size: 13px; }
+  .scenarios button.active { background: var(--surface-2); color: var(--text-primary); }
+  .scenarios[hidden] { display: none; }
+
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
+  .card h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+  .section-label { font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+                   color: var(--text-muted); margin: 0 0 8px; }
+
+  /* Top row: risk hero + tiles */
+  .top { display: grid; grid-template-columns: 300px 1fr; gap: 16px; }
+  @media (max-width: 760px) { .top { grid-template-columns: 1fr; } }
+  .risk { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; }
+  .gauge { position: relative; width: 190px; height: 110px; }
+  .gauge svg { width: 100%; height: 100%; }
+  .gauge .num { position: absolute; left: 0; right: 0; bottom: 4px; font-size: 44px; font-weight: 700;
+                font-variant-numeric: tabular-nums; }
+  .status { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px;
+            padding: 4px 12px; border-radius: 999px; background: var(--surface-2); }
+  .status .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .reasons { list-style: none; padding: 0; margin: 6px 0 0; font-size: 13px; color: var(--text-secondary);
+             text-align: left; width: 100%; }
+  .reasons li { padding: 5px 0; border-top: 1px solid var(--border); }
+  .reasons li::before { content: "▸ "; color: var(--text-muted); }
+
+  .tiles-wrap { display: flex; flex-direction: column; gap: 14px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+  .tile .label { font-size: 12px; color: var(--text-secondary); }
+  .tile .value { font-size: 26px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .tile .value small { font-size: 13px; font-weight: 500; color: var(--text-muted); margin-left: 3px; }
+  .tile .sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; min-height: 16px; }
+
+  /* Charts */
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .chart { position: relative; height: 200px; margin-top: 8px; }
+  .chart svg { width: 100%; height: 100%; display: block; overflow: visible; }
+  .chart .axis { fill: var(--text-muted); font-size: 11px; }
+  .chart .gridline { stroke: var(--grid); stroke-width: 1; }
+  .chart .line { fill: none; stroke: var(--series-1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .chart .last { fill: var(--series-1); stroke: var(--surface-1); stroke-width: 2; }
+  .chart .last-label { fill: var(--text-primary); font-size: 12px; font-weight: 600; }
+  .chart .cross { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; }
+  .tooltip { position: absolute; pointer-events: none; background: var(--surface-2); border: 1px solid var(--border);
+             border-radius: 8px; padding: 6px 9px; font-size: 12px; white-space: nowrap; display: none;
+             transform: translate(-50%, -110%); color: var(--text-primary); }
+  .tooltip span { color: var(--text-muted); }
+
+  /* Chat */
+  .chat { background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px;
+          display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+  .chat-header { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .chat-header h2 { margin: 0; font-size: 15px; }
+  .chat-header p { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); }
+  .messages { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 88%; padding: 9px 12px; border-radius: 12px; line-height: 1.45; font-size: 14px; white-space: pre-wrap; }
+  .msg.user { align-self: flex-end; background: #2a5fa8; border-bottom-right-radius: 4px; }
+  .msg.bot { align-self: flex-start; background: var(--surface-2); border-bottom-left-radius: 4px; }
+  .msg.error { background: #4a1d1d; }
+  .typing span { display: inline-block; width: 6px; height: 6px; margin: 0 2px; border-radius: 50%;
+                 background: var(--text-muted); animation: blink 1.2s infinite; }
+  .typing span:nth-child(2) { animation-delay: .2s } .typing span:nth-child(3) { animation-delay: .4s }
+  @keyframes blink { 0%,80%,100% { opacity: .2 } 40% { opacity: 1 } }
+  .suggestions { display: flex; gap: 6px; padding: 0 14px 10px; flex-wrap: wrap; }
+  .suggestions button { background: transparent; color: var(--text-secondary); border: 1px solid var(--border);
+                        border-radius: 999px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+  .suggestions button:hover { color: var(--text-primary); border-color: var(--accent); }
+  .input { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--border); }
+  .input input { flex: 1; background: var(--bg); color: var(--text-primary); border: 1px solid var(--border);
+                 border-radius: 10px; padding: 10px 12px; font-size: 14px; outline: none; }
+  .input input:focus { border-color: var(--accent); }
+  .input button { background: var(--accent); color: #111; border: 0; border-radius: 10px; padding: 0 16px;
+                  font-weight: 700; cursor: pointer; }
+  .input button:disabled { opacity: .5; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="main">
+    <header>
+      <h1><span>☀</span> SolarGuard</h1>
+      <div class="badges">
+        <div class="badge">Vitals: <b id="src-vitals">–</b></div>
+        <div class="badge">Solar data: <b id="src-solar">–</b></div>
+      </div>
+      <div class="scenarios" id="scenarios" title="Demo scenarios (only with simulated vitals)">
+        <button data-s="rest">Resting</button>
+        <button data-s="walk">Walking</button>
+        <button data-s="run_sun">Running in the sun</button>
+      </div>
+    </header>
+
+    <div class="top">
+      <div class="card risk">
+        <h3>Risk index</h3>
+        <div class="gauge">
+          <svg viewBox="0 0 200 110" aria-hidden="true">
+            <path d="M15 100 A85 85 0 0 1 185 100" fill="none" stroke="var(--surface-2)" stroke-width="14" stroke-linecap="round"/>
+            <path id="gauge-arc" d="M15 100 A85 85 0 0 1 185 100" fill="none" stroke="var(--good)" stroke-width="14"
+                  stroke-linecap="round" pathLength="100" stroke-dasharray="0 100"/>
+          </svg>
+          <div class="num" id="risk-num">–</div>
+        </div>
+        <div class="status" id="risk-status"><span class="dot"></span><span>–</span></div>
+        <ul class="reasons" id="risk-reasons"></ul>
+      </div>
+
+      <div class="tiles-wrap">
+        <div>
+          <p class="section-label">Smartwatch</p>
+          <div class="tiles">
+            <div class="tile"><div class="label">❤ Heart rate</div><div class="value" id="t-hr">–<small>bpm</small></div><div class="sub" id="s-hr"></div></div>
+            <div class="tile"><div class="label">O₂ Saturation (SpO₂)</div><div class="value" id="t-spo2">–<small>%</small></div><div class="sub" id="s-spo2"></div></div>
+            <div class="tile"><div class="label">🌡 Skin temp</div><div class="value" id="t-skin">–<small>°C</small></div><div class="sub" id="s-skin"></div></div>
+            <div class="tile"><div class="label">👣 Steps</div><div class="value" id="t-steps">–</div><div class="sub">today</div></div>
+          </div>
+        </div>
+        <div>
+          <p class="section-label">Environment · NASA POWER</p>
+          <div class="tiles">
+            <div class="tile"><div class="label">☀ UV index</div><div class="value" id="t-uv">–</div><div class="sub" id="s-uv"></div></div>
+            <div class="tile"><div class="label">Solar irradiance</div><div class="value" id="t-irr">–<small>kWh/m²</small></div><div class="sub">daily total</div></div>
+            <div class="tile"><div class="label">Air temp</div><div class="value" id="t-air">–<small>°C</small></div><div class="sub" id="s-date"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="charts">
+      <div class="card"><h3>Heart rate (bpm) · last 3 minutes</h3><div class="chart" id="c-hr"></div></div>
+      <div class="card"><h3>Skin temperature (°C)</h3><div class="chart" id="c-skin"></div></div>
+      <div class="card"><h3>SpO₂ (%)</h3><div class="chart" id="c-spo2"></div></div>
+    </div>
+  </div>
+
+  <aside class="chat">
+    <div class="chat-header">
+      <h2>☀ Health assistant</h2>
+      <p>Sees your vitals and NASA data in real time</p>
+    </div>
+    <div class="messages" id="messages">
+      <div class="msg bot">Hi! Ask me anything about your condition or sun exposure.</div>
+    </div>
+    <div class="suggestions" id="suggestions">
+      <button>Is it safe to go for a run now?</button>
+      <button>Why is my risk score this high?</button>
+      <button>What does the UV index mean?</button>
+    </div>
+    <form class="input" id="form">
+      <input id="text" placeholder="Type a message…" autocomplete="off">
+      <button id="send">➤</button>
+    </form>
+  </aside>
+</div>
+
+<script>
+const API = "";              // same server
+const POLL_MS = 2000;        // refresh every 2 s
+const WINDOW_MS = 3 * 60e3;  // charts show the last 3 minutes
+const $ = id => document.getElementById(id);
+const fmt = (v, d = 0) => v == null ? "–" : Number(v).toFixed(d);
+
+// ------------------------------------------------------------ Line chart ---
+// One series per chart, one axis, crosshair + tooltip on hover.
+function makeChart(el, { unit, decimals = 0, minSpan = 10 }) {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  const tip = document.createElement("div"); tip.className = "tooltip";
+  el.append(svg, tip);
+  let data = [], hoverX = null;
+  const M = { l: 34, r: 44, t: 10, b: 20 };
+
+  function draw() {
+    const W = el.clientWidth, H = el.clientHeight;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.innerHTML = "";
+    if (!data.length) return;
+    const now = data[data.length - 1].t, t0 = now - WINDOW_MS;
+    let lo = Math.min(...data.map(d => d.v)), hi = Math.max(...data.map(d => d.v));
+    const pad = Math.max((minSpan - (hi - lo)) / 2, 0);
+    lo -= pad; hi += pad;
+    const x = t => M.l + (t - t0) / WINDOW_MS * (W - M.l - M.r);
+    const y = v => M.t + (1 - (v - lo) / (hi - lo || 1)) * (H - M.t - M.b);
+    const add = (tag, attrs, text) => {
+      const n = document.createElementNS(NS, tag);
+      for (const k in attrs) n.setAttribute(k, attrs[k]);
+      if (text != null) n.textContent = text;
+      svg.appendChild(n); return n;
+    };
+    for (let i = 0; i <= 2; i++) {               // 3 horizontal gridlines
+      const v = lo + (hi - lo) * i / 2, yy = y(v);
+      add("line", { class: "gridline", x1: M.l, x2: W - M.r, y1: yy, y2: yy });
+      add("text", { class: "axis", x: M.l - 6, y: yy + 4, "text-anchor": "end" }, fmt(v, decimals));
+    }
+    add("text", { class: "axis", x: M.l, y: H - 4 }, "−3 min");
+    add("text", { class: "axis", x: W - M.r, y: H - 4, "text-anchor": "end" }, "now");
+    const pts = data.filter(d => d.t >= t0);
+    add("path", { class: "line", d: pts.map((d, i) => `${i ? "L" : "M"}${x(d.t).toFixed(1)},${y(d.v).toFixed(1)}`).join("") });
+    const last = pts[pts.length - 1];
+    add("circle", { class: "last", cx: x(last.t), cy: y(last.v), r: 4 });
+    add("text", { class: "last-label", x: x(last.t) + 8, y: y(last.v) + 4 }, fmt(last.v, decimals));
+
+    if (hoverX != null) {                         // crosshair + tooltip
+      const tAt = t0 + (hoverX - M.l) / (W - M.l - M.r) * WINDOW_MS;
+      const d = pts.reduce((a, b) => Math.abs(b.t - tAt) < Math.abs(a.t - tAt) ? b : a);
+      const cx = x(d.t);
+      add("line", { class: "cross", x1: cx, x2: cx, y1: M.t, y2: H - M.b });
+      add("circle", { class: "last", cx, cy: y(d.v), r: 4 });
+      tip.style.display = "block";
+      tip.style.left = cx + "px"; tip.style.top = y(d.v) + "px";
+      const ago = Math.round((now - d.t) / 1000);
+      tip.innerHTML = `<b>${fmt(d.v, decimals)} ${unit}</b> <span>· ${ago ? ago + " s ago" : "now"}</span>`;
+    } else tip.style.display = "none";
+  }
+  el.addEventListener("mousemove", e => { hoverX = e.offsetX; draw(); });
+  el.addEventListener("mouseleave", () => { hoverX = null; draw(); });
+  new ResizeObserver(draw).observe(el);
+  return {
+    push(t, v) {
+      if (v == null) return;
+      data.push({ t, v });
+      data = data.filter(d => d.t >= t - WINDOW_MS - POLL_MS);
+      draw();
+    }
+  };
+}
+
+const charts = {
+  hr:   makeChart($("c-hr"),   { unit: "bpm", minSpan: 20 }),
+  skin: makeChart($("c-skin"), { unit: "°C", decimals: 1, minSpan: 1.5 }),
+  spo2: makeChart($("c-spo2"), { unit: "%", decimals: 1, minSpan: 3 }),
+};
+
+// ----------------------------------------------------------- Dashboard ---
+const LEVELS = {
+  low:      { color: "var(--good)",     icon: "✓", text: "Low" },
+  moderate: { color: "var(--warning)",  icon: "!", text: "Moderate" },
+  high:     { color: "var(--critical)", icon: "▲", text: "High" },
+};
+function uvCategory(uv) {
+  if (uv == null) return "";
+  if (uv < 3) return "Low";
+  if (uv < 6) return "Moderate · use sunscreen";
+  if (uv < 8) return "High · seek shade 12–4 pm";
+  if (uv < 11) return "Very high";
+  return "Extreme";
+}
+function hrNote(hr) {
+  if (hr == null) return "";
+  if (hr < 60) return "low";
+  if (hr <= 100) return "normal resting";
+  if (hr <= 140) return "elevated";
+  return "high exertion";
+}
+const setVal = (id, text) => { const el = $(id); el.firstChild.nodeValue = text; };
+
+function render(ctx) {
+  const v = ctx.vitals, s = ctx.solar, r = ctx.risk;
+  // Data sources
+  $("src-vitals").textContent = ctx.vitals_simulated ? "simulated" : "watch ●";
+  $("src-solar").textContent = s.source?.startsWith("NASA") ? "NASA POWER" : s.source?.startsWith("demo") ? "demo scenario" : "estimate (offline)";
+  $("scenarios").hidden = !ctx.vitals_simulated;
+  document.querySelectorAll("#scenarios button").forEach(b => b.classList.toggle("active", b.dataset.s === ctx.scenario));
+  // Risk
+  const L = LEVELS[r.level];
+  $("risk-num").textContent = r.score;
+  const arc = $("gauge-arc");
+  arc.setAttribute("stroke-dasharray", `${r.score} 100`);
+  arc.setAttribute("stroke", L.color);
+  $("risk-status").innerHTML = `<span class="dot" style="background:${L.color}"></span><span>${L.icon} ${L.text} risk</span>`;
+  $("risk-reasons").innerHTML = (r.reasons.length ? r.reasons : ["All values within normal ranges"])
+    .map(x => `<li>${x}</li>`).join("");
+  // Tiles
+  setVal("t-hr", fmt(v.heart_rate)); $("s-hr").textContent = hrNote(v.heart_rate);
+  setVal("t-spo2", fmt(v.spo2, 1)); $("s-spo2").textContent = v.spo2 == null ? "" : v.spo2 < 94 ? "low" : "normal";
+  setVal("t-skin", fmt(v.skin_temp, 1)); $("s-skin").textContent = v.skin_temp >= 37 ? "high" : "";
+  $("t-steps").textContent = v.steps == null ? "–" : v.steps.toLocaleString("en-US");
+  $("t-uv").textContent = fmt(s.uv_index, 1); $("s-uv").textContent = uvCategory(s.uv_index);
+  setVal("t-irr", fmt(s.irradiance_kwh_m2_day, 2));
+  setVal("t-air", fmt(s.air_temp_c, 1));
+  $("s-date").textContent = s.date ? `NASA, ${s.date.slice(6)}/${s.date.slice(4, 6)}` : "";
+  // Charts
+  const t = (v.timestamp || Date.now() / 1000) * 1000;
+  charts.hr.push(t, v.heart_rate);
+  charts.skin.push(t, v.skin_temp);
+  charts.spo2.push(t, v.spo2);
+}
+
+async function poll() {
+  try { render(await (await fetch(`${API}/api/context`)).json()); } catch (e) { console.warn(e); }
+}
+$("scenarios").addEventListener("click", async e => {
+  const name = e.target.dataset?.s; if (!name) return;
+  await fetch(`${API}/api/scenario`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ name }) });
+  poll();
+});
+poll(); setInterval(poll, POLL_MS);
+
+// ---------------------------------------------------------------- Chat ---
+const history = [];
+function addMsg(role, text, cls = "") {
+  const el = document.createElement("div");
+  el.className = `msg ${role} ${cls}`; el.textContent = text;
+  $("messages").appendChild(el); $("messages").scrollTop = $("messages").scrollHeight;
+  return el;
+}
+async function send(text) {
+  text = text.trim(); if (!text) return;
+  $("suggestions").style.display = "none";
+  addMsg("user", text); $("text").value = ""; $("send").disabled = true;
+  const typing = addMsg("bot", ""); typing.classList.add("typing");
+  typing.innerHTML = "<span></span><span></span><span></span>";
+  try {
+    const res = await fetch(`${API}/api/chat`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                                 body: JSON.stringify({ message: text, history }) });
+    const data = await res.json(); typing.remove();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    addMsg("bot", data.reply);
+    history.push({ role: "user", content: text }, { role: "assistant", content: data.reply });
+  } catch (e) { typing.remove(); addMsg("bot", "⚠ " + e.message, "error"); }
+  finally { $("send").disabled = false; $("text").focus(); }
+}
+$("form").addEventListener("submit", e => { e.preventDefault(); send($("text").value); });
+$("suggestions").addEventListener("click", e => { if (e.target.tagName === "BUTTON") send(e.target.textContent); });
+</script>
+</body>
+</html>
