@@ -10,6 +10,7 @@ healthMonitor.py reads these module-level variables:
     bloodPressure (systolic, diastolic) in mmHg
 Optional extras (healthMonitor falls back to defaults if missing):
     age, sex ("male"/"female"), activity ("sedentary", "light", "moderate", "active", "very_active")
+    radiationTest  demo only: % of the ~100 MB radiation-test list to corrupt before a test (0 = real scan only)
 """
 
 import sys
@@ -27,6 +28,11 @@ bloodPressure = (118, 76)     # (systolic, diastolic) mmHg
 age = 30                      # years
 sex = "male"                  # "male" / "female"
 activity = "light"            # activity level
+radiationTest = 0.0           # demo only: % of cells to corrupt before the test (0 = real scan only)
+
+# demo presets -> % of cells corrupted (one NOAA S level per tenfold step)
+STORM_PRESETS = {"off": 0.0, "minor": 0.0005, "moderate": 0.005,
+                 "strong": 0.05, "severe": 0.5, "extreme": 2.0}
 
 
 def _parse_bp(text):
@@ -55,6 +61,16 @@ def _apply(w, h, bp, a, s, act):
     activity = act.strip().lower()
 
 
+def _set_demo_storm(key):
+    """Choose how many cells the demo corrupts before the radiation test (off = none)."""
+    global radiationTest
+    key = key.strip().lower()
+    if key not in STORM_PRESETS:
+        raise ValueError("Demo storm must be one of: " + ", ".join(STORM_PRESETS))
+    radiationTest = STORM_PRESETS[key]
+    return radiationTest
+
+
 # ------------------------------------------------------------------ console UI
 def _ask(prompt, default):
     raw = input(f"{prompt} [{default}]: ").strip()
@@ -75,17 +91,22 @@ def run_console():
                 _ask("Activity (sedentary/light/moderate/active/very_active)", activity),
             )
             healthMonitor.run()
+            while True:
+                choice = input("\n[t] test solar radiation   [m] measure again   [q] quit: ").strip().lower()
+                if choice == "t":
+                    demo = _ask("Demo: inject radiation hits first? (off/" + "/".join(list(STORM_PRESETS)[1:]) + ")", "off")
+                    percent = _set_demo_storm(demo)
+                    result = healthMonitor.run_radiation_test(percent)
+                    print()
+                    print(healthMonitor.format_radiation_result(result))
+                elif choice == "m":
+                    break
+                else:
+                    return
         except ValueError as err:
             print(f"Invalid input: {err}")
         except (EOFError, KeyboardInterrupt):
             print()
-            return
-        try:
-            again = input("\nMeasure again? (y/n) [n]: ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return
-        if again != "y":
             return
 
 
@@ -156,6 +177,9 @@ def run_window():
                           padding: 12px; font-weight: 700; font-size: 14px; }}
     QPushButton#primary:hover {{ background: #7DD3FC; }}
     QPushButton#primary:pressed {{ background: #0EA5E9; }}
+    QPushButton#secondary {{ background: transparent; color: {ACCENT}; border: 1px solid {ACCENT};
+                            border-radius: 10px; padding: 11px; font-weight: 700; font-size: 14px; }}
+    QPushButton#secondary:hover {{ background: {_rgba(ACCENT, 38)}; }}
     QFrame#card {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 14px; }}
     QScrollArea {{ border: none; background: {BG}; }}
     QScrollBar:vertical {{ background: transparent; width: 10px; margin: 0; }}
@@ -284,7 +308,7 @@ def run_window():
 
     # ------------------------------------------------------------ result sections
     def metric_card(m):
-        color = LEVEL_COLORS[m.level]
+        color = MUTED if m.value == "Not tested" else LEVEL_COLORS[m.level]
         card = make_card(color)
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         lay = QVBoxLayout(card)
@@ -319,7 +343,7 @@ def run_window():
         gl.addWidget(make_label("Overall health score", color=MUTED, size=12, align=AlignCenter))
         top.addWidget(gauge_card)
 
-        n_ok = sum(1 for m in report.metrics if m.level == 0)
+        n_ok = sum(1 for m in report.metrics if m.level == 0 and m.value != "Not tested")
         n_warn = sum(1 for m in report.metrics if m.level == 1)
         n_alert = len(report.alerts)
         banner_color = LEVEL_COLORS[2] if n_alert else (LEVEL_COLORS[1] if n_warn else LEVEL_COLORS[0])
@@ -400,7 +424,7 @@ def run_window():
         lay = QVBoxLayout(page)
         lay.addStretch()
         lay.addWidget(make_label("No reading yet", size=22, bold=True, align=AlignCenter))
-        lay.addWidget(make_label("Enter your details on the left and press \u201cRead watch & analyze\u201d.",
+        lay.addWidget(make_label("Enter your details on the left and press \u201cRead watch & analyze\u201d, then \u201cTest solar radiation\u201d.",
                                  color=MUTED, size=14, align=AlignCenter))
         lay.addStretch()
         return page
@@ -438,6 +462,8 @@ def run_window():
     act_in = QComboBox()
     act_in.addItems(["sedentary", "light", "moderate", "active", "very_active"])
     act_in.setCurrentText(activity)
+    storm_in = QComboBox()
+    storm_in.addItems(list(STORM_PRESETS))
 
     def field(text, widget):
         box = QVBoxLayout()
@@ -465,6 +491,15 @@ def run_window():
     button.setObjectName("primary")
     button.setCursor(Qt.CursorShape.PointingHandCursor)
     sb.addWidget(button)
+    sb.addSpacing(10)
+    test_button = QPushButton("Test solar radiation")
+    test_button.setObjectName("secondary")
+    test_button.setCursor(Qt.CursorShape.PointingHandCursor)
+    sb.addWidget(test_button)
+    sb.addSpacing(6)
+    sb.addLayout(field("Demo: inject radiation hits", storm_in))
+    sb.addWidget(make_label("Leave on \u201coff\u201d for a real scan of the 100 MB memory list.",
+                            name="muted", size=11, wrap=True))
     error_label = make_label("", name="error", wrap=True)
     sb.addWidget(error_label)
     sb.addStretch()
@@ -495,20 +530,39 @@ def run_window():
     root.addWidget(sidebar)
     root.addLayout(main_col, 1)
 
-    def analyze():
+    state = {"sensors": None}
+
+    def refresh(test):
+        """test=False: read the watch and analyse.  test=True: run the radiation test on the
+        100 MB memory list, then rebuild the dashboard with the same watch readings."""
         try:
             _apply(weight_in.text(), height_in.text(), bp_in.text(),
                    age_in.text(), sex_in.currentText(), act_in.currentText())
-            report = healthMonitor.build_report()
+            if test:
+                healthMonitor.run_radiation_test(_set_demo_storm(storm_in.currentText()))
+            report = healthMonitor.build_report(state["sensors"] if test else None)
         except (ValueError, KeyError, TypeError) as err:
             error_label.setText(str(err))
             return
         error_label.setText("")
-        healthMonitor.log_report(report)
+        state["sensors"] = {k: report.raw[k] for k in healthMonitor.SENSOR_LIMITS}
+        if not test:
+            healthMonitor.log_report(report)
         scroll.setWidget(build_results(report, read_scores()))
-        subtitle.setText(f"Last reading: {report.timestamp}")
+        rad = healthMonitor.last_radiation_test()
+        if test and rad:
+            subtitle.setText(f"Radiation tested at {rad['time']} \u2013 {rad['bad']:,} of {rad['cells']:,} cells not null")
+        else:
+            subtitle.setText(f"Last reading: {report.timestamp}")
+
+    def analyze():
+        refresh(False)
+
+    def test_radiation():
+        refresh(True)
 
     button.clicked.connect(analyze)
+    test_button.clicked.connect(test_radiation)
     for line in (weight_in, height_in, bp_in, age_in):
         line.returnPressed.connect(analyze)
 

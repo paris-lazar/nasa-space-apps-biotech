@@ -20,12 +20,18 @@ Reference standards used (all adult-oriented):
     Hydration .......... ~30-35 mL per kg body weight per day (EFSA total water intake as reference)
     Protein ............ RDA 0.8 g per kg per day
     Physical activity .. WHO 2020: 150-300 min/week moderate or 75-150 min vigorous
+    Solar radiation .... NOAA SWPC radiation-storm scale S1-S5 (one level per 10x change);
+                         here estimated with a ~100 MB 'canary' memory (see section below)
 
 NOT a medical device. Results are informational and never replace a doctor.
 """
 
 import csv
+import math
 import os
+import random
+import struct
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -321,10 +327,130 @@ def read_sensors():
     return data
 
 
+# ============================================================ solar radiation canary
+# A list of ~100 MB filled with None. Ionising radiation (solar energetic particles,
+# cosmic rays) can flip bits in RAM ("single-event upsets"), so a cell that is no longer
+# None is evidence of a radiation hit. The share of NOT-None cells is mapped to NOAA's
+# S1-S5 scale (one level per tenfold change). This is a HEURISTIC INDEX, not a calibrated
+# dosimeter: on Earth the atmosphere, magnetic field and ECC RAM make real upsets very rare,
+# so use the demo option (UserInt.STORM_PRESETS) to see the test react.
+RADIATION_BYTES = 100 * 1024 * 1024
+RADIATION_CELLS = RADIATION_BYTES // struct.calcsize("P")      # one pointer per cell
+_radiation_memory = None
+
+# NOAA-style bands: lower bound of the not-None percentage for each level
+RADIATION_BANDS = [
+    (1.0, "S5", "Extreme radiation storm"),
+    (0.1, "S4", "Severe radiation storm"),
+    (0.01, "S3", "Strong radiation storm"),
+    (0.001, "S2", "Moderate radiation storm"),
+    (0.0001, "S1", "Minor radiation storm"),
+]
+RADIATION_ADVICE = {
+    "S0": "No sign of elevated radiation. Forecasts: swpc.noaa.gov.",
+    "S1": "Minor: no biological effect on the ground; small effects possible for astronauts and polar-route crews.",
+    "S2": "Moderate: very small added exposure on high-latitude flights; watch space-weather alerts.",
+    "S3": "Strong: raised exposure for astronauts and high-altitude polar flights. On the ground the atmosphere and magnetic field protect you; consider postponing polar flights.",
+    "S4": "Severe: significant radiation hazard for astronauts and high-altitude flights. Stay informed through national space-weather services.",
+    "S5": "Extreme: unavoidable high radiation for anyone in space or very high altitude. On the ground you stay shielded; follow official guidance.",
+}
+
+
+def radiation_memory():
+    """The canary list, created on first use (about 100 MB of RAM)."""
+    global _radiation_memory
+    if _radiation_memory is None:
+        _radiation_memory = [None] * RADIATION_CELLS
+    return _radiation_memory
+
+
+def simulate_radiation_hits(percent):
+    """Test helper: corrupt `percent` % of the cells (turn them into non-None)."""
+    if percent <= 0:
+        return 0
+    mem = radiation_memory()
+    hits = min(RADIATION_CELLS, round(RADIATION_CELLS * percent / 100))
+    for i in random.sample(range(RADIATION_CELLS), hits):
+        mem[i] = 1
+    return hits
+
+
+def scan_radiation_memory():
+    """Return (non_null_cells, non_null_percent) and repair the list afterwards."""
+    mem = radiation_memory()
+    bad = len(mem) - mem.count(None)
+    if bad:
+        for i in [i for i, v in enumerate(mem) if v is not None]:
+            mem[i] = None
+    return bad, 100.0 * bad / len(mem)
+
+
+def radiation_likelihood(percent):
+    """0-100 index: 0 at <=0.000001 % non-null, 100 at >=1 % (logarithmic)."""
+    if percent <= 0:
+        return 0.0
+    return max(0.0, min(1.0, (math.log10(percent) + 6) / 6)) * 100
+
+
+def classify_solar_radiation(percent):
+    """Return (scale, label, level, advice) for the not-None percentage."""
+    for lower, scale, label in RADIATION_BANDS:
+        if percent >= lower:
+            level = WARN if scale in ("S1", "S2") else ALERT
+            return scale, label, level, RADIATION_ADVICE[scale]
+    return "S0", "Background level", OK, RADIATION_ADVICE["S0"]
+
+
+_last_radiation = None      # result of the most recent test (None = never tested)
+
+
+def run_radiation_test(simulate_percent=0.0):
+    """
+    THE TEST: scan the ~100 MB all-None list, count the cells that are NOT None, and turn
+    that percentage into a solar-radiation likelihood and NOAA S-level.
+    `simulate_percent` > 0 first corrupts that share of cells (demo only, for computers
+    where no real bit flip occurs).
+    """
+    global _last_radiation
+    started = time.perf_counter()
+    simulated = simulate_radiation_hits(simulate_percent)
+    bad, percent = scan_radiation_memory()
+    seconds = time.perf_counter() - started
+    scale, label, level, advice = classify_solar_radiation(percent)
+    _last_radiation = {
+        "cells": RADIATION_CELLS, "bad": bad, "percent": percent, "scale": scale,
+        "label": label, "level": level, "advice": advice,
+        "likelihood": radiation_likelihood(percent), "seconds": seconds,
+        "simulated": simulated, "time": datetime.now().strftime("%H:%M:%S"),
+    }
+    return _last_radiation
+
+
+def last_radiation_test():
+    return _last_radiation
+
+
+def format_radiation_result(res):
+    lines = [
+        "-" * 78,
+        f" SOLAR RADIATION TEST  -  {res['time']}",
+        f" Memory list : {res['cells']:,} cells (~{RADIATION_BYTES // (1024 * 1024)} MB), all None before the test",
+        f" Not None    : {res['bad']:,} cells = {res['percent']:.6f} %"
+        + (f"  (demo: {res['simulated']:,} cells deliberately corrupted)" if res["simulated"] else ""),
+        f" Likelihood  : {res['likelihood']:.0f}% of high solar radiation  ->  {res['label']} ({res['scale']})",
+        f" Advice      : {res['advice']}",
+        f" Scan time   : {res['seconds']:.2f} s",
+        "-" * 78,
+    ]
+    return "\n".join(lines)
+
+
+
 # ============================================================ report building
-def build_report():
+def build_report(sensors=None):
+    """`sensors`: reuse earlier watch readings instead of reading the watch again."""
     p = get_profile()
-    s = read_sensors()
+    s = dict(sensors) if sensors is not None else read_sensors()
     r = Report(timestamp=datetime.now().strftime("%Y-%m-%d %H:%M"))
     r.raw = {**s, "weight": p["weight"], "height": p["height"],
              "sys": p["bp"][0], "dia": p["bp"][1]}
@@ -364,6 +490,16 @@ def build_report():
     add("sleep", "Sleep (last night)", "{:.1f} h", classify_sleep, p["age"])
     add("stress", "Stress score", "{:.0f} /100", classify_stress)
 
+    # --- solar radiation danger (filled by run_radiation_test, i.e. the Test button)
+    rad = last_radiation_test()
+    if rad is None:
+        r.metrics.append(Metric("Solar radiation danger", "Not tested", "Not tested yet",
+                                "Press \u201cTest solar radiation\u201d to scan the 100 MB memory list.", OK))
+    else:
+        r.metrics.append(Metric("Solar radiation danger", f"{rad['likelihood']:.0f}% likely",
+                                f"{rad['label']} ({rad['scale']})", rad["advice"], rad["level"]))
+        r.raw["solar_nonnull_pct"] = rad["percent"]
+
     # --- informational numbers
     bmr = bmr_mifflin(p["weight"], p["height"], p["age"], p["sex"])
     r.extras.append(("Energy", f"BMR {bmr:.0f} kcal/day; maintenance about "
@@ -377,6 +513,11 @@ def build_report():
         zones = heart_rate_zones(s["hr"], p["age"])
         zone_text = "; ".join(f"{k}: {a}-{b} bpm" for k, (a, b) in zones.items())
         r.extras.append(("Heart-rate zones", f"Max HR about {hr_max:.0f} bpm. {zone_text}."))
+    if rad is not None:
+        demo = f" (demo: {rad['simulated']:,} cells deliberately corrupted)" if rad["simulated"] else ""
+        r.extras.append(("Radiation test", f"{rad['time']}: scanned {rad['cells']:,} cells (~{RADIATION_BYTES // (1024 * 1024)} MB of None) "
+                                           f"in {rad['seconds']:.2f} s; {rad['bad']:,} not-None = {rad['percent']:.6f} %{demo}. "
+                                           f"Likelihood index {rad['likelihood']:.0f}/100."))
     r.extras.append(("Activity goal", "WHO: 150-300 min/week moderate (or 75-150 min vigorous) plus strength work 2 days/week."))
 
     # --- combined-risk rules
@@ -484,7 +625,9 @@ def trend_summary(last_n=7):
 
 
 # ============================================================ entry point
-def run():
+def run(test_radiation=False):
+    if test_radiation:
+        run_radiation_test()
     try:
         report = build_report()
     except ValueError as err:
@@ -496,4 +639,4 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    run(test_radiation=True)
