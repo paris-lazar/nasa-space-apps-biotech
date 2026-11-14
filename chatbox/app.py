@@ -7,6 +7,8 @@ SolarGuard backend – NASA Space Apps Challenge 2026.
 - POST /api/scenario: switch the demo scenario (rest / walk / run_sun)
 - GET  /           : the main dashboard (static/dashboard.html)
 - GET  /chat       : standalone chat box (static/chat.html)
+- /api/health/...  : daily health check powered by the team's healthMonitor.py /
+                     smartwatch.py / UserInt.py (repo root), see the health section below
 
 Run:
     pip install -r requirements.txt
@@ -18,19 +20,36 @@ Run:
 import math
 import os
 import random
+import sys
+import tempfile
+import threading
 import time
 from datetime import date, timedelta
 from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from groq import Groq
 from pydantic import BaseModel
 
 load_dotenv(Path(__file__).parent / ".env")  # loads GROQ_API_KEY from .env
+
+# The team's health engine lives in the repo root (healthMonitor.py, smartwatch.py,
+# UserInt.py). Make it importable whether the server starts from the root or chatbox/.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+try:
+    import healthMonitor
+    import smartwatch
+    import UserInt
+    HEALTH_ERROR = None
+except Exception as e:  # keep the dashboard running even if the module is missing
+    healthMonitor = smartwatch = UserInt = None
+    HEALTH_ERROR = f"{type(e).__name__}: {e}"
 
 MODEL = os.getenv("CHAT_MODEL", "openai/gpt-oss-120b")
 LAT = float(os.getenv("LAT", "37.98"))   # Athens by default
@@ -212,6 +231,154 @@ def get_context():
     }
 
 
+
+# ------------------------------------------------- Daily health check ---
+# Wraps the team's engine: healthMonitor.build_report() reads the profile from
+# UserInt and the daily vitals from smartwatch (an uploaded export or simulated).
+_health = {"sensors": None, "report": None, "export": None}
+_health_lock = threading.Lock()
+
+
+def _require_health():
+    if healthMonitor is None:
+        raise HTTPException(503, f"Health module not available ({HEALTH_ERROR}).")
+
+
+def _report_to_dict(r) -> dict:
+    lvl = {healthMonitor.OK: "ok", healthMonitor.WARN: "warn", healthMonitor.ALERT: "alert"}
+    return {
+        "timestamp": r.timestamp,
+        "score": r.score,
+        "score_label": healthMonitor.score_label(r.score),
+        "metrics": [{"name": m.name, "value": m.value, "status": m.status,
+                     "advice": m.advice, "level": lvl[m.level]} for m in r.metrics],
+        "extras": [{"label": a, "text": b} for a, b in r.extras],
+        "alerts": r.alerts,
+        "trend": healthMonitor.trend_summary().strip(),
+    }
+
+
+def _health_state() -> dict:
+    return {
+        "available": True,
+        "profile": {"weight": UserInt.weight, "height": UserInt.height,
+                    "bp": f"{UserInt.bloodPressure[0]}/{UserInt.bloodPressure[1]}",
+                    "age": UserInt.age, "sex": UserInt.sex, "activity": UserInt.activity},
+        "sources": smartwatch.data_source(),
+        "export": _health["export"],
+        "storm_presets": list(UserInt.STORM_PRESETS),
+        "report": _health["report"],
+    }
+
+
+def _rebuild(reread: bool = False, log: bool = True) -> dict:
+    """Build a new report. Sensor readings are kept until the watch is re-read,
+    so changing the profile does not silently change the vitals."""
+    if reread or _health["sensors"] is None:
+        _health["sensors"] = healthMonitor.read_sensors()
+    try:
+        r = healthMonitor.build_report(_health["sensors"])
+    except (ValueError, KeyError, TypeError) as e:
+        raise HTTPException(400, str(e))
+    if log:
+        healthMonitor.log_report(r)
+    _health["report"] = _report_to_dict(r)
+    return _health_state()
+
+
+@app.get("/api/health")
+def get_health():
+    if healthMonitor is None:
+        return {"available": False, "error": HEALTH_ERROR}
+    with _health_lock:
+        if _health["report"] is None:
+            return _rebuild(log=False)
+        return _health_state()
+
+
+class Profile(BaseModel):
+    weight: str
+    height: str
+    bp: str
+    age: str
+    sex: str = "male"
+    activity: str = "light"
+
+
+@app.post("/api/health/profile")
+def set_profile(p: Profile):
+    _require_health()
+    with _health_lock:
+        try:
+            UserInt._apply(p.weight, p.height, p.bp, p.age, p.sex, p.activity)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return _rebuild()
+
+
+@app.post("/api/health/reread")
+def reread_watch():
+    _require_health()
+    with _health_lock:
+        return _rebuild(reread=True)
+
+
+MAX_EXPORT_BYTES = 200 * 1024 * 1024
+
+
+@app.post("/api/health/upload")
+async def upload_export(file: UploadFile = File(...)):
+    """Load a smartwatch export (Apple Health .zip/.xml, .csv or .json) via smartwatch.py."""
+    _require_health()
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in (".zip", ".xml", ".csv", ".json"):
+        raise HTTPException(400, "Unsupported file. Use .zip/.xml (Apple Health), .csv or .json")
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / f"export{suffix}"
+        size = 0
+        with open(path, "wb") as out:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_EXPORT_BYTES:
+                    raise HTTPException(413, "File too large (max 200 MB).")
+                out.write(chunk)
+        with _health_lock:
+            try:
+                found = smartwatch.smartwatch(str(path))
+            except Exception as e:
+                raise HTTPException(400, f"Could not read the export: {e}")
+            _health["export"] = {"filename": file.filename, "found": found}
+            return _rebuild(reread=True)
+
+
+class StormTest(BaseModel):
+    storm: str = "off"
+
+
+@app.post("/api/health/radiation")
+def radiation_test(t: StormTest):
+    """Runs the team's RAM bit-flip 'canary' test (healthMonitor.run_radiation_test).
+    'storm' > off deliberately corrupts cells first, as a demo."""
+    _require_health()
+    if t.storm not in UserInt.STORM_PRESETS:
+        raise HTTPException(400, f"storm must be one of {list(UserInt.STORM_PRESETS)}")
+    with _health_lock:
+        healthMonitor.run_radiation_test(UserInt.STORM_PRESETS[t.storm])
+        return _rebuild()
+
+
+def health_for_chat() -> dict | None:
+    rep = _health["report"]
+    if not rep:
+        return None
+    return {
+        "overall_score": f"{rep['score']}/100 ({rep['score_label']})",
+        "metrics": [f"{m['name']}: {m['value']} - {m['status']}" for m in rep["metrics"]],
+        "notes": [f"{e['label']}: {e['text']}" for e in rep["extras"]],
+        "watch_data_source": smartwatch.data_source(),
+    }
+
+
 # -------------------------------------------------------------------- Chat ---
 SYSTEM_PROMPT = """You are the health assistant of SolarGuard, an app that combines smartwatch
 vitals with NASA solar radiation data (NASA POWER API).
@@ -223,6 +390,12 @@ Rules:
 - Do not diagnose. If values look concerning, suggest seeing a doctor,
   and for emergency symptoms tell them to call local emergency services (112 in Europe, 911 in the US).
 - If the vitals are simulated or the solar data is not from NASA, you may say so when asked.
+- "health_check" (if present) is the user's daily health report: profile-based metrics
+  (BMI, blood pressure) and daily watch values (resting HR, sleep, stress...). Use it for
+  questions about their general health.
+- Its "Solar radiation danger" metric comes from an experimental RAM bit-flip "canary" test
+  (a heuristic index, often demo-simulated), not from a radiation sensor. For actual sun
+  exposure, rely on the NASA POWER UV and irradiance values.
 
 CURRENT DATA:
 {context}
@@ -254,6 +427,8 @@ def client() -> Groq:
 @app.post("/api/chat")
 def chat(req: ChatRequest):
     ctx = get_context()
+    if healthMonitor is not None:
+        ctx["health_check"] = health_for_chat()
     messages = [{"role": "system", "content": SYSTEM_PROMPT.format(context=ctx)}]
     messages += [m.model_dump() for m in req.history[-10:]]  # last 10 messages
     messages.append({"role": "user", "content": req.message})

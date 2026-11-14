@@ -106,6 +106,50 @@
   .input button { background: var(--accent); color: #111; border: 0; border-radius: 10px; padding: 0 16px;
                   font-weight: 700; cursor: pointer; }
   .input button:disabled { opacity: .5; }
+
+  /* Daily health check (team's healthMonitor engine) */
+  .health-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .health-head h3 { margin: 0; font-size: 15px; color: var(--text-primary); }
+  .health-head .muted { font-size: 12px; color: var(--text-muted); }
+  .health-grid { display: grid; grid-template-columns: 250px 170px 1fr; gap: 18px; align-items: start; }
+  @media (max-width: 1100px) { .health-grid { grid-template-columns: 1fr 1fr; } .h-metrics { grid-column: 1 / -1; } }
+  @media (max-width: 640px) { .health-grid { grid-template-columns: 1fr; } }
+  .profile { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .profile label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-secondary); }
+  .profile input, .profile select { background: var(--bg); color: var(--text-primary); border: 1px solid var(--border);
+      border-radius: 8px; padding: 7px 8px; font-size: 13px; width: 100%; font-family: inherit; }
+  .profile input:focus, .profile select:focus { outline: none; border-color: var(--accent); }
+  .profile .full { grid-column: 1 / -1; }
+  .btn { background: var(--surface-2); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px;
+         padding: 8px 10px; font-size: 13px; cursor: pointer; font-family: inherit; text-align: center; }
+  .btn:hover { border-color: var(--accent); }
+  .profile label.btn { display: block; font-size: 13px; color: var(--text-primary); }
+  .btn.primary { background: var(--accent); color: #111; border-color: var(--accent); font-weight: 700; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .h-err { color: var(--serious); font-size: 12px; min-height: 0; }
+  .hint { font-size: 11px; color: var(--text-muted); margin: 0; }
+  .h-score { text-align: center; background: var(--surface-2); border-radius: 12px; padding: 16px 10px; }
+  .h-score .big { font-size: 46px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+  .h-score .big small { font-size: 15px; color: var(--text-muted); font-weight: 500; }
+  .h-score .lbl { margin-top: 6px; font-weight: 600; font-size: 14px; }
+  .h-score .ts, .h-score .trend { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+  .h-metrics { display: flex; flex-direction: column; }
+  .mrow { display: grid; grid-template-columns: 22px 1fr auto; gap: 2px 10px; padding: 7px 0; border-top: 1px solid var(--border); }
+  .mrow:first-child { border-top: 0; padding-top: 0; }
+  .mrow .ic { grid-row: span 2; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
+              font-size: 11px; font-weight: 800; color: #111; margin-top: 1px; }
+  .mrow .nm { font-size: 13px; font-weight: 600; }
+  .mrow .nm span { font-weight: 400; color: var(--text-secondary); margin-left: 6px; }
+  .mrow .vl { font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .mrow .adv { grid-column: 2 / -1; font-size: 12px; color: var(--text-muted); }
+  .src { font-size: 10px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; margin-left: 6px; }
+  details.extras { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+  details.extras summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+  details.extras ul { margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+  .radiation { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; display: flex; gap: 10px;
+               align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); }
+  .radiation b { color: var(--text-primary); }
+  .radiation select { background: var(--bg); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; }
 </style>
 </head>
 <body>
@@ -165,6 +209,46 @@
       <div class="card"><h3>Skin temperature (°C)</h3><div class="chart" id="c-skin"></div></div>
       <div class="card"><h3>SpO₂ (%)</h3><div class="chart" id="c-spo2"></div></div>
     </div>
+
+    <section class="card" id="health">
+      <div class="health-head">
+        <h3>🩺 Daily health check</h3>
+        <span class="muted">Profile + daily watch data · clinical reference ranges (WHO, AHA, NEWS2, AASM)</span>
+      </div>
+      <div id="health-off" class="hint" hidden></div>
+      <div class="health-grid" id="health-body">
+        <form class="profile" id="profile">
+          <label>Weight (kg)<input name="weight" inputmode="decimal" required></label>
+          <label>Height (cm)<input name="height" inputmode="decimal" required></label>
+          <label>Blood pressure<input name="bp" placeholder="120/80" required></label>
+          <label>Age<input name="age" inputmode="numeric" required></label>
+          <label>Sex<select name="sex"><option>male</option><option>female</option></select></label>
+          <label>Activity<select name="activity">
+            <option>sedentary</option><option>light</option><option>moderate</option><option>active</option><option value="very_active">very active</option>
+          </select></label>
+          <button class="btn primary full" id="analyze">Analyze</button>
+          <div class="h-err full" id="h-err"></div>
+          <label class="btn full" for="h-file">⬆ Upload watch export</label>
+          <input type="file" id="h-file" accept=".zip,.xml,.csv,.json" hidden>
+          <button type="button" class="btn full" id="h-reread">↻ Re-read watch</button>
+          <p class="hint full" id="h-export">Apple Health (.zip/.xml), CSV or JSON. Without an export, daily values are simulated.</p>
+        </form>
+        <div class="h-score">
+          <div class="big" id="h-score">–<small>/100</small></div>
+          <div class="lbl" id="h-label">–</div>
+          <div class="ts" id="h-ts"></div>
+          <div class="trend" id="h-trend"></div>
+        </div>
+        <div class="h-metrics" id="h-metrics"></div>
+      </div>
+      <details class="extras" id="h-extras-wrap"><summary>Daily recommendations (energy, hydration, heart-rate zones…)</summary><ul id="h-extras"></ul></details>
+      <div class="radiation">
+        <span><b>Experimental:</b> RAM bit-flip radiation "canary" (scans a ~100 MB memory list for flipped bits)</span>
+        <select id="h-storm" aria-label="Demo storm"></select>
+        <button type="button" class="btn" id="h-rad">Run test</button>
+        <span id="h-rad-out"></span>
+      </div>
+    </section>
   </div>
 
   <aside class="chat">
@@ -178,6 +262,7 @@
     <div class="suggestions" id="suggestions">
       <button>Is it safe to go for a run now?</button>
       <button>Why is my risk score this high?</button>
+      <button>How is my overall health today?</button>
       <button>What does the UV index mean?</button>
     </div>
     <form class="input" id="form">
@@ -330,6 +415,82 @@ $("scenarios").addEventListener("click", async e => {
   poll();
 });
 poll(); setInterval(poll, POLL_MS);
+
+// ------------------------------------------------- Daily health check ---
+const LV = { ok: { c: "var(--good)", i: "✓" }, warn: { c: "var(--warning)", i: "!" }, alert: { c: "var(--critical)", i: "▲" } };
+const SRC_KEY = { "Resting heart rate": "hr", "Blood oxygen (SpO2)": "ox", "Respiratory rate": "pr",
+                  "Temperature": "temp", "Sleep (last night)": "sleep", "Stress score": "stress" };
+const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let profileFilled = false;
+
+function scoreColor(score) {
+  return score >= 75 ? "var(--good)" : score >= 55 ? "var(--warning)" : "var(--critical)";
+}
+function renderHealth(h) {
+  if (!h.available) {
+    $("health-body").hidden = true;
+    $("health-off").hidden = false;
+    $("health-off").textContent = "Health module not available: " + (h.error || "");
+    return;
+  }
+  const f = $("profile").elements;
+  if (!profileFilled) {               // fill the form once, then let the user edit it
+    for (const k of ["weight", "height", "bp", "age", "sex", "activity"]) f[k].value = h.profile[k];
+    profileFilled = true;
+  }
+  if (!$("h-storm").options.length)
+    $("h-storm").innerHTML = h.storm_presets.map(p => `<option value="${p}">${p === "off" ? "real scan (no demo)" : "demo: " + p + " storm"}</option>`).join("");
+  const r = h.report; if (!r) return;
+  $("h-score").firstChild.nodeValue = r.score;
+  $("h-label").textContent = r.score_label;
+  $("h-label").style.color = scoreColor(r.score);
+  $("h-ts").textContent = "Last analysis: " + r.timestamp;
+  const t = r.trend.replace(/^Trend:\s*/, "").split(";")[0];   // e.g. "score: 58.0 (avg of previous 6: 84.7)"
+  const mt = t.match(/score: ([\d.]+) \(avg of previous (\d+): ([\d.]+)\)/);
+  $("h-trend").textContent = mt ? `Previous ${mt[2]} checks: avg ${Math.round(+mt[3])}` : "";
+  $("h-metrics").innerHTML = r.metrics.map(m => {
+    const L = LV[m.level], src = h.sources[SRC_KEY[m.name]];
+    return `<div class="mrow"><div class="ic" style="background:${L.c}" title="${m.level}">${L.i}</div>
+      <div class="nm">${esc(m.name)}${src ? `<em class="src">${src === "export" ? "watch export" : "simulated"}</em>` : ""}<span>${esc(m.status)}</span></div>
+      <div class="vl">${esc(m.value)}</div><div class="adv">${esc(m.advice)}</div></div>`;
+  }).join("");
+  $("h-extras").innerHTML = r.extras.map(e => `<li><b>${esc(e.label)}:</b> ${esc(e.text)}</li>`).join("");
+  if (h.export) {
+    const n = Object.values(h.export.found).reduce((a, b) => a + b, 0);
+    $("h-export").textContent = `Loaded ${h.export.filename}: ${n.toLocaleString("en-US")} records. Metrics missing from the export are simulated.`;
+  }
+  const rad = r.metrics.find(m => m.name === "Solar radiation danger");
+  if (rad && rad.value !== "Not tested") $("h-rad-out").textContent = `${rad.value} · ${rad.status}`;
+}
+async function healthCall(url, opts = {}) {
+  $("h-err").textContent = "";
+  const btns = document.querySelectorAll("#health button"); btns.forEach(b => b.disabled = true);
+  try {
+    const res = await fetch(`${API}${url}`, opts);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    renderHealth(data);
+  } catch (e) { $("h-err").textContent = e.message; }
+  finally { btns.forEach(b => b.disabled = false); }
+}
+const jsonPost = body => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+$("profile").addEventListener("submit", e => {
+  e.preventDefault();
+  healthCall("/api/health/profile", jsonPost(Object.fromEntries(new FormData($("profile")))));
+});
+$("h-reread").addEventListener("click", () => healthCall("/api/health/reread", { method: "POST" }));
+$("h-file").addEventListener("change", e => {
+  const file = e.target.files[0]; if (!file) return;
+  const fd = new FormData(); fd.append("file", file);
+  $("h-export").textContent = `Reading ${file.name}…`;
+  healthCall("/api/health/upload", { method: "POST", body: fd });
+  e.target.value = "";
+});
+$("h-rad").addEventListener("click", () => {
+  $("h-rad-out").textContent = "Scanning memory…";
+  healthCall("/api/health/radiation", jsonPost({ storm: $("h-storm").value }));
+});
+healthCall("/api/health");
 
 // ---------------------------------------------------------------- Chat ---
 const history = [];
