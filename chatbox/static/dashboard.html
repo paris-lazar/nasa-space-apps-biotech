@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="el">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -115,18 +115,18 @@
       <h1><span>☀</span> SolarGuard</h1>
       <div class="badges">
         <div class="badge">Vitals: <b id="src-vitals">–</b></div>
-        <div class="badge">Ηλιακά δεδομένα: <b id="src-solar">–</b></div>
+        <div class="badge">Solar data: <b id="src-solar">–</b></div>
       </div>
-      <div class="scenarios" id="scenarios" title="Demo σενάρια (μόνο με simulated vitals)">
-        <button data-s="rest">Ξεκούραση</button>
-        <button data-s="walk">Περπάτημα</button>
-        <button data-s="run_sun">Τρέξιμο στον ήλιο</button>
+      <div class="scenarios" id="scenarios" title="Demo scenarios (only with simulated vitals)">
+        <button data-s="rest">Resting</button>
+        <button data-s="walk">Walking</button>
+        <button data-s="run_sun">Running in the sun</button>
       </div>
     </header>
 
     <div class="top">
       <div class="card risk">
-        <h3>Δείκτης κινδύνου</h3>
+        <h3>Risk index</h3>
         <div class="gauge">
           <svg viewBox="0 0 200 110" aria-hidden="true">
             <path d="M15 100 A85 85 0 0 1 185 100" fill="none" stroke="var(--surface-2)" stroke-width="14" stroke-linecap="round"/>
@@ -141,61 +141,61 @@
 
       <div class="tiles-wrap">
         <div>
-          <p class="section-label">Ρολόι</p>
+          <p class="section-label">Smartwatch</p>
           <div class="tiles">
-            <div class="tile"><div class="label">❤ Παλμοί</div><div class="value" id="t-hr">–<small>bpm</small></div><div class="sub" id="s-hr"></div></div>
-            <div class="tile"><div class="label">O₂ Κορεσμός (SpO₂)</div><div class="value" id="t-spo2">–<small>%</small></div><div class="sub" id="s-spo2"></div></div>
-            <div class="tile"><div class="label">🌡 Θερμ. δέρματος</div><div class="value" id="t-skin">–<small>°C</small></div><div class="sub" id="s-skin"></div></div>
-            <div class="tile"><div class="label">👣 Βήματα</div><div class="value" id="t-steps">–</div><div class="sub">σήμερα</div></div>
+            <div class="tile"><div class="label">❤ Heart rate</div><div class="value" id="t-hr">–<small>bpm</small></div><div class="sub" id="s-hr"></div></div>
+            <div class="tile"><div class="label">O₂ Saturation (SpO₂)</div><div class="value" id="t-spo2">–<small>%</small></div><div class="sub" id="s-spo2"></div></div>
+            <div class="tile"><div class="label">🌡 Skin temp</div><div class="value" id="t-skin">–<small>°C</small></div><div class="sub" id="s-skin"></div></div>
+            <div class="tile"><div class="label">👣 Steps</div><div class="value" id="t-steps">–</div><div class="sub">today</div></div>
           </div>
         </div>
         <div>
-          <p class="section-label">Περιβάλλον · NASA POWER</p>
+          <p class="section-label">Environment · NASA POWER</p>
           <div class="tiles">
             <div class="tile"><div class="label">☀ UV index</div><div class="value" id="t-uv">–</div><div class="sub" id="s-uv"></div></div>
-            <div class="tile"><div class="label">Ηλιακή ακτινοβολία</div><div class="value" id="t-irr">–<small>kWh/m²</small></div><div class="sub">ημερήσια</div></div>
-            <div class="tile"><div class="label">Θερμ. αέρα</div><div class="value" id="t-air">–<small>°C</small></div><div class="sub" id="s-date"></div></div>
+            <div class="tile"><div class="label">Solar irradiance</div><div class="value" id="t-irr">–<small>kWh/m²</small></div><div class="sub">daily total</div></div>
+            <div class="tile"><div class="label">Air temp</div><div class="value" id="t-air">–<small>°C</small></div><div class="sub" id="s-date"></div></div>
           </div>
         </div>
       </div>
     </div>
 
     <div class="charts">
-      <div class="card"><h3>Παλμοί (bpm) · τελευταία 3 λεπτά</h3><div class="chart" id="c-hr"></div></div>
-      <div class="card"><h3>Θερμοκρασία δέρματος (°C)</h3><div class="chart" id="c-skin"></div></div>
+      <div class="card"><h3>Heart rate (bpm) · last 3 minutes</h3><div class="chart" id="c-hr"></div></div>
+      <div class="card"><h3>Skin temperature (°C)</h3><div class="chart" id="c-skin"></div></div>
       <div class="card"><h3>SpO₂ (%)</h3><div class="chart" id="c-spo2"></div></div>
     </div>
   </div>
 
   <aside class="chat">
     <div class="chat-header">
-      <h2>☀ Βοηθός υγείας</h2>
-      <p>Βλέπει τα vitals σου και τα δεδομένα της NASA σε πραγματικό χρόνο</p>
+      <h2>☀ Health assistant</h2>
+      <p>Sees your vitals and NASA data in real time</p>
     </div>
     <div class="messages" id="messages">
-      <div class="msg bot">Γεια! Ρώτα με ό,τι θέλεις για την κατάστασή σου ή την ηλιακή έκθεση.</div>
+      <div class="msg bot">Hi! Ask me anything about your condition or sun exposure.</div>
     </div>
     <div class="suggestions" id="suggestions">
-      <button>Είναι ασφαλές να τρέξω τώρα;</button>
-      <button>Γιατί είναι αυτό το σκορ κινδύνου;</button>
-      <button>Τι σημαίνει το UV index;</button>
+      <button>Is it safe to go for a run now?</button>
+      <button>Why is my risk score this high?</button>
+      <button>What does the UV index mean?</button>
     </div>
     <form class="input" id="form">
-      <input id="text" placeholder="Γράψε ένα μήνυμα…" autocomplete="off">
+      <input id="text" placeholder="Type a message…" autocomplete="off">
       <button id="send">➤</button>
     </form>
   </aside>
 </div>
 
 <script>
-const API = "";              // ίδιος server
-const POLL_MS = 2000;        // ανανέωση κάθε 2 δευτ.
-const WINDOW_MS = 3 * 60e3;  // τα γραφήματα δείχνουν 3 λεπτά
+const API = "";              // same server
+const POLL_MS = 2000;        // refresh every 2 s
+const WINDOW_MS = 3 * 60e3;  // charts show the last 3 minutes
 const $ = id => document.getElementById(id);
 const fmt = (v, d = 0) => v == null ? "–" : Number(v).toFixed(d);
 
 // ------------------------------------------------------------ Line chart ---
-// Ένα series ανά γράφημα, ένας άξονας, crosshair + tooltip στο hover.
+// One series per chart, one axis, crosshair + tooltip on hover.
 function makeChart(el, { unit, decimals = 0, minSpan = 10 }) {
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(NS, "svg");
@@ -221,13 +221,13 @@ function makeChart(el, { unit, decimals = 0, minSpan = 10 }) {
       if (text != null) n.textContent = text;
       svg.appendChild(n); return n;
     };
-    for (let i = 0; i <= 2; i++) {               // 3 οριζόντιες γραμμές πλέγματος
+    for (let i = 0; i <= 2; i++) {               // 3 horizontal gridlines
       const v = lo + (hi - lo) * i / 2, yy = y(v);
       add("line", { class: "gridline", x1: M.l, x2: W - M.r, y1: yy, y2: yy });
       add("text", { class: "axis", x: M.l - 6, y: yy + 4, "text-anchor": "end" }, fmt(v, decimals));
     }
-    add("text", { class: "axis", x: M.l, y: H - 4 }, "−3 λεπτά");
-    add("text", { class: "axis", x: W - M.r, y: H - 4, "text-anchor": "end" }, "τώρα");
+    add("text", { class: "axis", x: M.l, y: H - 4 }, "−3 min");
+    add("text", { class: "axis", x: W - M.r, y: H - 4, "text-anchor": "end" }, "now");
     const pts = data.filter(d => d.t >= t0);
     add("path", { class: "line", d: pts.map((d, i) => `${i ? "L" : "M"}${x(d.t).toFixed(1)},${y(d.v).toFixed(1)}`).join("") });
     const last = pts[pts.length - 1];
@@ -243,7 +243,7 @@ function makeChart(el, { unit, decimals = 0, minSpan = 10 }) {
       tip.style.display = "block";
       tip.style.left = cx + "px"; tip.style.top = y(d.v) + "px";
       const ago = Math.round((now - d.t) / 1000);
-      tip.innerHTML = `<b>${fmt(d.v, decimals)} ${unit}</b> <span>· ${ago ? ago + " δευτ. πριν" : "τώρα"}</span>`;
+      tip.innerHTML = `<b>${fmt(d.v, decimals)} ${unit}</b> <span>· ${ago ? ago + " s ago" : "now"}</span>`;
     } else tip.style.display = "none";
   }
   el.addEventListener("mousemove", e => { hoverX = e.offsetX; draw(); });
@@ -267,53 +267,53 @@ const charts = {
 
 // ----------------------------------------------------------- Dashboard ---
 const LEVELS = {
-  low:      { color: "var(--good)",     icon: "✓", text: "Χαμηλός" },
-  moderate: { color: "var(--warning)",  icon: "!", text: "Μέτριος" },
-  high:     { color: "var(--critical)", icon: "▲", text: "Υψηλός" },
+  low:      { color: "var(--good)",     icon: "✓", text: "Low" },
+  moderate: { color: "var(--warning)",  icon: "!", text: "Moderate" },
+  high:     { color: "var(--critical)", icon: "▲", text: "High" },
 };
 function uvCategory(uv) {
   if (uv == null) return "";
-  if (uv < 3) return "Χαμηλός";
-  if (uv < 6) return "Μέτριος · αντηλιακό";
-  if (uv < 8) return "Υψηλός · σκιά 12–16";
-  if (uv < 11) return "Πολύ υψηλός";
-  return "Ακραίος";
+  if (uv < 3) return "Low";
+  if (uv < 6) return "Moderate · use sunscreen";
+  if (uv < 8) return "High · seek shade 12–4 pm";
+  if (uv < 11) return "Very high";
+  return "Extreme";
 }
 function hrNote(hr) {
   if (hr == null) return "";
-  if (hr < 60) return "χαμηλοί";
-  if (hr <= 100) return "φυσιολογικοί ηρεμίας";
-  if (hr <= 140) return "αυξημένοι";
-  return "υψηλή καταπόνηση";
+  if (hr < 60) return "low";
+  if (hr <= 100) return "normal resting";
+  if (hr <= 140) return "elevated";
+  return "high exertion";
 }
 const setVal = (id, text) => { const el = $(id); el.firstChild.nodeValue = text; };
 
 function render(ctx) {
   const v = ctx.vitals, s = ctx.solar, r = ctx.risk;
-  // Πηγές
-  $("src-vitals").textContent = ctx.vitals_simulated ? "προσομοίωση" : "ρολόι ●";
-  $("src-solar").textContent = s.source?.startsWith("NASA") ? "NASA POWER" : s.source?.startsWith("demo") ? "demo σενάριο" : "εκτίμηση (offline)";
+  // Data sources
+  $("src-vitals").textContent = ctx.vitals_simulated ? "simulated" : "watch ●";
+  $("src-solar").textContent = s.source?.startsWith("NASA") ? "NASA POWER" : s.source?.startsWith("demo") ? "demo scenario" : "estimate (offline)";
   $("scenarios").hidden = !ctx.vitals_simulated;
   document.querySelectorAll("#scenarios button").forEach(b => b.classList.toggle("active", b.dataset.s === ctx.scenario));
-  // Κίνδυνος
+  // Risk
   const L = LEVELS[r.level];
   $("risk-num").textContent = r.score;
   const arc = $("gauge-arc");
   arc.setAttribute("stroke-dasharray", `${r.score} 100`);
   arc.setAttribute("stroke", L.color);
-  $("risk-status").innerHTML = `<span class="dot" style="background:${L.color}"></span><span>${L.icon} ${L.text} κίνδυνος</span>`;
-  $("risk-reasons").innerHTML = (r.reasons.length ? r.reasons : ["Όλες οι τιμές σε φυσιολογικά επίπεδα"])
+  $("risk-status").innerHTML = `<span class="dot" style="background:${L.color}"></span><span>${L.icon} ${L.text} risk</span>`;
+  $("risk-reasons").innerHTML = (r.reasons.length ? r.reasons : ["All values within normal ranges"])
     .map(x => `<li>${x}</li>`).join("");
   // Tiles
   setVal("t-hr", fmt(v.heart_rate)); $("s-hr").textContent = hrNote(v.heart_rate);
-  setVal("t-spo2", fmt(v.spo2, 1)); $("s-spo2").textContent = v.spo2 == null ? "" : v.spo2 < 94 ? "χαμηλό" : "φυσιολογικό";
-  setVal("t-skin", fmt(v.skin_temp, 1)); $("s-skin").textContent = v.skin_temp >= 37 ? "υψηλή" : "";
-  $("t-steps").textContent = v.steps == null ? "–" : v.steps.toLocaleString("el-GR");
+  setVal("t-spo2", fmt(v.spo2, 1)); $("s-spo2").textContent = v.spo2 == null ? "" : v.spo2 < 94 ? "low" : "normal";
+  setVal("t-skin", fmt(v.skin_temp, 1)); $("s-skin").textContent = v.skin_temp >= 37 ? "high" : "";
+  $("t-steps").textContent = v.steps == null ? "–" : v.steps.toLocaleString("en-US");
   $("t-uv").textContent = fmt(s.uv_index, 1); $("s-uv").textContent = uvCategory(s.uv_index);
   setVal("t-irr", fmt(s.irradiance_kwh_m2_day, 2));
   setVal("t-air", fmt(s.air_temp_c, 1));
   $("s-date").textContent = s.date ? `NASA, ${s.date.slice(6)}/${s.date.slice(4, 6)}` : "";
-  // Γραφήματα
+  // Charts
   const t = (v.timestamp || Date.now() / 1000) * 1000;
   charts.hr.push(t, v.heart_rate);
   charts.skin.push(t, v.skin_temp);

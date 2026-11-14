@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="el">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -15,7 +15,7 @@
   body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text);
          display: flex; justify-content: center; align-items: center; min-height: 100vh; }
 
-  /* Το .chatbox είναι αυτόνομο: μπορείτε να το αντιγράψετε μέσα στο dashboard */
+  /* .chatbox is self-contained and can be embedded elsewhere */
   .chatbox { width: 100%; max-width: 420px; height: 620px; background: var(--panel);
              border: 1px solid var(--border); border-radius: 16px;
              display: flex; flex-direction: column; overflow: hidden; }
@@ -67,23 +67,23 @@
   </div>
 
   <div class="messages" id="messages">
-    <div class="msg bot">Γεια! Βλέπω τα vitals σου και τα δεδομένα ηλιακής ακτινοβολίας της NASA. Ρώτα με ό,τι θέλεις.</div>
+    <div class="msg bot">Hi! I can see your vitals and NASA solar radiation data. Ask me anything.</div>
   </div>
 
   <div class="suggestions" id="suggestions">
-    <button>Είναι ασφαλές να τρέξω τώρα;</button>
-    <button>Τι σημαίνει το UV index;</button>
-    <button>Γιατί είναι αυτό το σκορ κινδύνου;</button>
+    <button>Is it safe to go for a run now?</button>
+    <button>What does the UV index mean?</button>
+    <button>Why is my risk score this high?</button>
   </div>
 
   <form class="input" id="form">
-    <input id="text" placeholder="Γράψε ένα μήνυμα…" autocomplete="off">
+    <input id="text" placeholder="Type a message…" autocomplete="off">
     <button id="send">➤</button>
   </form>
 </div>
 
 <script>
-  // Αν το chat σερβίρεται από άλλο server (π.χ. το dashboard), βάλε εδώ το backend URL.
+  // If this page is served from another origin, put the backend URL here.
   const API = "";
 
   const $ = id => document.getElementById(id);
@@ -111,8 +111,8 @@
     $("temp").textContent = ctx.solar.air_temp_c ?? "–";
     const r = $("risk");
     r.className = `risk ${ctx.risk.level}`;
-    r.textContent = `Κίνδυνος ${ctx.risk.score}`;
-    r.title = ctx.risk.reasons.join(", ") || "Όλα καλά";
+    r.textContent = `Risk ${ctx.risk.score}`;
+    r.title = ctx.risk.reasons.join(", ") || "All good";
   }
 
   async function refreshContext() {
