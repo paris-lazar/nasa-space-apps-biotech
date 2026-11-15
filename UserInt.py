@@ -11,8 +11,14 @@ healthMonitor.py reads these module-level variables:
 Optional extras (healthMonitor falls back to defaults if missing):
     age, sex ("male"/"female"), activity ("sedentary", "light", "moderate", "active", "very_active")
     radiationTest  demo only: % of the ~100 MB radiation-test list to corrupt before a test (0 = real scan only)
+
+Watch data: "Analyze (demo)" re-analyses the latest measurement stored in health_log.csv; otherwise
+the user uploads a smartwatch export (Apple Health .zip/.xml, .json or .csv).
+The file is first passed through smartwatch.py, which cleans / normalises the format, and the
+cleaned values are then read by healthMonitor.py and shown here.
 """
 
+import os
 import sys
 
 # When this file is the starting script it is "__main__". Register it under its
@@ -71,6 +77,196 @@ def _set_demo_storm(key):
     return radiationTest
 
 
+# ------------------------------------------------------------------ smartwatch export upload
+WATCH_EXTENSIONS = (".zip", ".xml", ".json", ".csv")
+FILE_FILTER = ("Smartwatch exports (*.zip *.xml *.json *.csv);;Apple Health (*.zip *.xml);;"
+               "JSON (*.json);;CSV (*.csv);;All files (*)")
+NO_FILE_TEXT = "No file loaded \u2013 Apple Health (.zip / .xml), .json or .csv"
+_METRIC_NAMES = {"heart_rate": "heart rate", "resting_hr": "resting HR", "hrv": "HRV",
+                 "resp_rate": "respiration", "spo2": "SpO2", "systolic": "blood pressure",
+                 "diastolic": "blood pressure", "temp": "temperature", "sleep_hours": "sleep",
+                 "sleep_intervals": "sleep", "stress": "stress"}
+
+
+# health_log.csv (written by healthMonitor after every measurement) -> names smartwatch.py knows
+_LOG_COLUMNS = {
+    "timestamp": ("timestamp", "time", "date", "datetime", "ts"),
+    "sleep_hours": ("sleep", "sleep_hours", "sleep_h", "sleep_total_h"),
+    "resting_hr": ("hr", "heart_rate", "resting_hr", "resting_heart_rate", "pulse", "bpm"),
+    "stress": ("stress", "stress_score"),
+    "resp_rate": ("pr", "resp_rate", "respiratory_rate", "respiration", "breathing", "breathing_rate"),
+    "temp": ("temp", "temperature", "body_temperature", "skin_temperature"),
+    "spo2": ("ox", "spo2", "oxygen", "oxygen_saturation", "blood_oxygen"),
+    "systolic": ("systolic", "sys", "bp_sys", "bp_systolic", "blood_pressure_systolic"),
+    "diastolic": ("diastolic", "dia", "bp_dia", "bp_diastolic", "blood_pressure_diastolic"),
+    "bp": ("bp", "blood_pressure", "bloodpressure"),          # one column like "120/80"
+}
+_UNIT_SUFFIXES = ("_c", "_bpm", "_pct", "_percent", "_h", "_hours", "_mmhg", "_brpm")
+
+
+def health_log_path():
+    """The CSV healthMonitor logs every measurement to (healthMonitor.LOG_FILE)."""
+    try:
+        import healthMonitor
+        path = healthMonitor.LOG_FILE
+    except Exception:
+        path = None
+    return str(path) if path else os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                               "health_log.csv")
+
+
+def _log_column(header):
+    import re
+    name = re.sub(r"[^a-z0-9]+", "_", str(header).lower()).strip("_")   # "SpO2 (%)" -> "spo2"
+    for suffix in _UNIT_SUFFIXES:
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    for target, aliases in _LOG_COLUMNS.items():
+        if name in aliases:
+            return target
+    return None
+
+
+LOG_PROFILE = {}      # weight / height of the last logged measurement (filled by prepare_health_log)
+
+
+def prepare_health_log(path, last=1):
+    """Copy the last `last` rows of health_log.csv (default: the latest measurement) into a
+    temporary CSV whose columns use the names smartwatch.py understands.
+    Returns the temporary file's path (caller deletes it)."""
+    import csv
+    import tempfile
+    import smartwatch
+    if not os.path.isfile(path):
+        raise ValueError(f"{os.path.basename(path)} not found yet - run \u201cUpload watch & analyze\u201d "
+                         "once so a measurement is logged.")
+    try:
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            headers = reader.fieldnames or []
+            rows = list(reader)[-last:]
+    except (OSError, UnicodeDecodeError, csv.Error) as err:
+        raise ValueError(f"Could not read {os.path.basename(path)} ({err}).") from None
+    if not rows:
+        raise ValueError(f"{os.path.basename(path)} has no measurements yet.")
+    mapping = {}                                   # canonical name -> original header (first wins)
+    for header in headers:
+        target = _log_column(header)
+        if target and target not in mapping:
+            mapping[target] = header
+    if not set(mapping) - {"timestamp"}:
+        raise ValueError(f"No vital-sign columns recognised in {os.path.basename(path)} "
+                         f"(columns: {', '.join(h for h in headers if h)}).")
+    LOG_PROFILE.clear()
+    for key, names in (("weight", ("weight", "weight_kg")), ("height", ("height", "height_cm"))):
+        for header in headers:
+            if str(header).strip().lower() in names and str(rows[-1].get(header) or "").strip():
+                LOG_PROFILE[key] = str(rows[-1][header]).strip()
+                break
+    columns = ["ts"] + [t for t in mapping if t not in ("timestamp", "bp")]
+    if "bp" in mapping:
+        columns += [c for c in ("systolic", "diastolic") if c not in columns]
+    fd, tmp = tempfile.mkstemp(suffix=".csv", prefix="health_log_clean_")
+    try:
+        with os.fdopen(fd, "w", newline="", encoding="utf-8") as out:
+            writer = csv.writer(out)
+            writer.writerow(columns)
+            for i, row in enumerate(rows):
+                try:                               # real time if parseable, else row order
+                    ts = smartwatch._ts(row.get(mapping.get("timestamp"), ""))
+                except (TypeError, ValueError):
+                    ts = i
+                values = {t: row.get(h) for t, h in mapping.items()}
+                if "bp" in values and not values.get("systolic"):
+                    try:
+                        values["systolic"], values["diastolic"] = _parse_bp(values["bp"] or "")
+                    except ValueError:
+                        pass
+                writer.writerow([ts] + [values.get(c) if values.get(c) is not None else ""
+                                        for c in columns[1:]])
+    except Exception:
+        os.remove(tmp)
+        raise
+    return tmp
+
+
+def load_health_log(path=None):
+    """Step 1 for the demo: health_log.csv -> clean columns -> smartwatch.py (same route as an
+    uploaded file). Returns {metric: number of records}."""
+    tmp = prepare_health_log(path or health_log_path())
+    try:
+        return load_watch_file(tmp)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _describe(found):
+    """'heart rate, SpO2, sleep' - the vitals smartwatch.py found in the file."""
+    names = []
+    for key in found:
+        name = _METRIC_NAMES.get(key, key)
+        if name not in names:
+            names.append(name)
+    return ", ".join(names)
+
+
+def _reset_watch():
+    """Forget any loaded export, so smartwatch.py is back to its simulated values."""
+    import smartwatch
+    smartwatch._DATA.clear()
+    smartwatch._SLEEP.clear()
+    smartwatch._SOURCE.clear()
+
+
+def load_watch_file(path):
+    """Step 1: pass the user's export file through smartwatch.py (it parses + cleans the
+    format). Returns {metric: number of records}. Raises ValueError with a readable message."""
+    import json
+    import xml.etree.ElementTree as ET
+    import zipfile
+    import smartwatch
+
+    path = os.path.expanduser(str(path).strip().strip('"').strip("'"))
+    if not os.path.isfile(path):
+        raise ValueError(f"File not found: {path}")
+    if not path.lower().endswith(WATCH_EXTENSIONS):
+        raise ValueError("Unsupported file. Use Apple Health (.zip / .xml), .json or .csv.")
+    try:
+        found = smartwatch.smartwatch(path)
+    except zipfile.BadZipFile:
+        raise ValueError("This .zip is not a valid Apple Health export.") from None
+    except StopIteration:
+        raise ValueError("No export.xml inside the zip. Use the zip from Health > profile > "
+                         "Export All Health Data.") from None
+    except ET.ParseError:
+        raise ValueError("The XML file is damaged or is not an Apple Health export.xml.") from None
+    except json.JSONDecodeError:
+        raise ValueError("The JSON file is damaged or not valid JSON.") from None
+    except (ValueError, AttributeError, TypeError, KeyError, UnicodeDecodeError) as err:
+        raise ValueError(f"Unexpected file layout ({err}).") from None
+    except OSError as err:
+        raise ValueError(f"Could not read the file ({err}).") from None
+    if not found:
+        raise ValueError("No supported vital signs found in this file (looked for heart rate, "
+                         "SpO2, respiration, temperature, sleep, stress, blood pressure).")
+    return found
+
+
+def use_watch_bp():
+    """If the loaded export contains blood pressure, store it in bloodPressure and return it."""
+    global bloodPressure
+    import smartwatch
+    sys_, dia = smartwatch.get_bp()
+    if sys_ is None:
+        return None
+    bloodPressure = (sys_, dia)
+    return bloodPressure
+
+
 # ------------------------------------------------------------------ console UI
 def _ask(prompt, default):
     raw = input(f"{prompt} [{default}]: ").strip()
@@ -82,6 +278,16 @@ def run_console():
     print("=== Health Monitor ===  (press Enter to keep the value in brackets)")
     while True:
         try:
+            path = input("Smartwatch export (.zip/.xml Apple Health, .json, .csv) "
+                         "[Enter = keep current]: ").strip()
+            if path:
+                try:
+                    found = load_watch_file(path)
+                except ValueError:
+                    _reset_watch()
+                    raise
+                print("Loaded: " + _describe(found))
+                use_watch_bp()
             _apply(
                 _ask("Weight (kg)", weight),
                 _ask("Height (cm)", height),
@@ -146,12 +352,13 @@ def read_scores(limit=20):
 
 
 def run_window():
-    from PySide6.QtCore import QPointF, QRectF, Qt
+    from PySide6.QtCore import QPointF, QRectF, Qt, QThread, Signal
     from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
-    from PySide6.QtWidgets import (QApplication, QComboBox, QFrame, QGridLayout, QHBoxLayout,
-                                   QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy,
-                                   QVBoxLayout, QWidget)
+    from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QGridLayout,
+                                   QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
+                                   QSizePolicy, QVBoxLayout, QWidget)
     import healthMonitor
+    import smartwatch
 
     AlignCenter = Qt.AlignmentFlag.AlignCenter
     AlignLeft = Qt.AlignmentFlag.AlignLeft
@@ -215,6 +422,24 @@ def run_window():
         frame.setObjectName("card")
         frame.setStyleSheet(card_style(color))
         return frame
+
+    class WatchLoader(QThread):
+        """Reads the export through smartwatch.py in the background (Apple exports can be huge)."""
+        loaded = Signal(object)
+        failed = Signal(str)
+
+        def __init__(self, path, load=None):
+            super().__init__()
+            self.path = path
+            self.load = load or load_watch_file
+
+        def run(self):
+            try:
+                self.loaded.emit(self.load(self.path))
+            except ValueError as err:
+                self.failed.emit(str(err))
+            except Exception as err:  # never let the thread die silently
+                self.failed.emit(f"Could not read the file: {err}")
 
     # ------------------------------------------------------------ custom widgets
     class ScoreGauge(QWidget):
@@ -424,7 +649,7 @@ def run_window():
         lay = QVBoxLayout(page)
         lay.addStretch()
         lay.addWidget(make_label("No reading yet", size=22, bold=True, align=AlignCenter))
-        lay.addWidget(make_label("Enter your details on the left and press \u201cRead watch & analyze\u201d, then \u201cTest solar radiation\u201d.",
+        lay.addWidget(make_label("Enter your details on the left, press \u201cUpload watch & analyze\u201d and choose your smartwatch export, then \u201cTest solar radiation\u201d.",
                                  color=MUTED, size=14, align=AlignCenter))
         lay.addStretch()
         return page
@@ -487,10 +712,17 @@ def run_window():
     sb.addSpacing(8)
     sb.addLayout(field("Activity level", act_in))
     sb.addSpacing(18)
-    button = QPushButton("Read watch && analyze")
+    button = QPushButton("Upload watch && analyze")
     button.setObjectName("primary")
     button.setCursor(Qt.CursorShape.PointingHandCursor)
     sb.addWidget(button)
+    sb.addSpacing(8)
+    demo_button = QPushButton("Analyze (demo)")
+    demo_button.setObjectName("secondary")
+    demo_button.setCursor(Qt.CursorShape.PointingHandCursor)
+    sb.addWidget(demo_button)
+    file_label = make_label(NO_FILE_TEXT, name="muted", size=11, wrap=True)
+    sb.addWidget(file_label)
     sb.addSpacing(10)
     test_button = QPushButton("Test solar radiation")
     test_button.setObjectName("secondary")
@@ -530,7 +762,19 @@ def run_window():
     root.addWidget(sidebar)
     root.addLayout(main_col, 1)
 
-    state = {"sensors": None}
+    state = {"sensors": None, "file": None, "pending": None, "loader": None, "log": True,
+             "dir": os.path.expanduser("~")}
+
+    def source_text():
+        """Which values came from the uploaded file and which are simulated."""
+        if not state["file"]:
+            return "simulated watch data"
+        names = {"sleep": "sleep", "hr": "heart rate", "stress": "stress",
+                 "pr": "respiration", "temp": "temperature", "ox": "SpO2"}
+        simulated = [names.get(k, k) for k, v in smartwatch.data_source().items() if v == "simulated"]
+        if simulated:
+            return f"{state['file']} (not in file, simulated: {', '.join(simulated)})"
+        return f"{state['file']} (all values from file)"
 
     def refresh(test):
         """test=False: read the watch and analyse.  test=True: run the radiation test on the
@@ -546,22 +790,90 @@ def run_window():
             return
         error_label.setText("")
         state["sensors"] = {k: report.raw[k] for k in healthMonitor.SENSOR_LIMITS}
-        if not test:
+        if not test and state["log"]:
             healthMonitor.log_report(report)
         scroll.setWidget(build_results(report, read_scores()))
         rad = healthMonitor.last_radiation_test()
         if test and rad:
             subtitle.setText(f"Radiation tested at {rad['time']} \u2013 {rad['bad']:,} of {rad['cells']:,} cells not null")
         else:
-            subtitle.setText(f"Last reading: {report.timestamp}")
+            subtitle.setText(f"Last reading: {report.timestamp} \u2013 {source_text()}")
 
     def analyze():
-        refresh(False)
+        """Re-analyse with the data already loaded (e.g. after editing weight or age)."""
+        if state["loader"] is None:
+            refresh(False)
+
+    def set_busy(busy):
+        button.setEnabled(not busy)
+        demo_button.setEnabled(not busy)
+        test_button.setEnabled(not busy)
+        button.setText("Reading file\u2026" if busy else "Upload watch && analyze")
+
+    def finish_loader():
+        loader = state["loader"]
+        if loader is not None:
+            loader.wait()
+            state["loader"] = None
+        set_busy(False)
+
+    def on_loaded(found):
+        finish_loader()
+        state["file"] = os.path.basename(state["pending"])
+        bp = use_watch_bp()          # blood pressure from the file, if the watch recorded it
+        if bp:
+            bp_in.setText(f"{bp[0]}/{bp[1]}")
+        if not state["log"]:         # demo (health_log.csv): also restore weight / height
+            if "weight" in LOG_PROFILE:
+                weight_in.setText(LOG_PROFILE["weight"])
+            if "height" in LOG_PROFILE:
+                height_in.setText(LOG_PROFILE["height"])
+        file_label.setText(f"{state['file']}\nFound: {_describe(found)}")
+        refresh(False)               # step 2: analyse the cleaned values
+
+    def on_failed(message):
+        finish_loader()
+        _reset_watch()
+        state["file"] = None
+        file_label.setText(NO_FILE_TEXT)
+        subtitle.setText("Waiting for the first reading")
+        error_label.setText(message)
+
+    def upload_and_analyze():
+        if state["loader"] is not None:
+            return
+        path, _ = QFileDialog.getOpenFileName(win, "Choose your smartwatch export",
+                                              state["dir"], FILE_FILTER)
+        if not path:
+            return
+        state["dir"] = os.path.dirname(path)
+        begin_load(path)
+
+    def analyze_demo():
+        """Demo: analyse the latest measurement already stored in health_log.csv."""
+        if state["loader"] is None:
+            begin_load(health_log_path(), load=load_health_log, log=False)
+
+    def begin_load(path, load=None, log=True):
+        """Pass the file through smartwatch.py in the background, then analyse (see on_loaded).
+        log=False: do not write the result back to the log (it was read from the log)."""
+        state["pending"] = path
+        state["log"] = log
+        error_label.setText("")
+        subtitle.setText(f"Reading {os.path.basename(path)} \u2026")
+        set_busy(True)
+        loader = WatchLoader(path, load)
+        loader.loaded.connect(on_loaded)
+        loader.failed.connect(on_failed)
+        state["loader"] = loader
+        loader.start()
 
     def test_radiation():
         refresh(True)
 
-    button.clicked.connect(analyze)
+    button.clicked.connect(upload_and_analyze)
+    demo_button.clicked.connect(analyze_demo)
+    app.aboutToQuit.connect(lambda: state["loader"] and state["loader"].wait())
     test_button.clicked.connect(test_radiation)
     for line in (weight_in, height_in, bp_in, age_in):
         line.returnPressed.connect(analyze)
