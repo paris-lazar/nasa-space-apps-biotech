@@ -6,7 +6,6 @@ SolarGuard backend – NASA Space Apps Challenge 2026.
 - POST /api/chat   : user question -> LLM answer grounded in the current context
 - POST /api/scenario: switch the demo scenario (rest / walk / run_sun)
 - GET  /           : the main dashboard (static/dashboard.html)
-- GET  /chat       : standalone chat box (static/chat.html)
 - /api/health/...  : daily health check powered by the team's healthMonitor.py /
                      smartwatch.py / UserInt.py (repo root), see the health section below
 
@@ -515,7 +514,3 @@ def chat(req: ChatRequest, request: Request):
 def dashboard():
     return FileResponse(STATIC / "dashboard.html")
 
-
-@app.get("/chat")
-def chat_page():
-    return FileResponse(STATIC / "chat.html")

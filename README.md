@@ -89,7 +89,7 @@ pip install -r requirements.txt
 python -m uvicorn app:app --reload
 ```
 
-Open http://localhost:8000 for the dashboard, or http://localhost:8000/chat for the standalone chat.
+Open http://localhost:8000 for the dashboard.
 
 Optional environment variables: `LAT` / `LON` (location, default Athens) and `CHAT_MODEL` (default `openai/gpt-oss-120b`).
 
@@ -109,7 +109,6 @@ Optional environment variables: `LAT` / `LON` (location, default Athens) and `CH
 | Endpoint | Description |
 |---|---|
 | `GET /` | Dashboard |
-| `GET /chat` | Standalone chat page |
 | `GET /api/context` | Live vitals, NASA solar data and sun-safety risk score |
 | `POST /api/vitals` | A watch posts `{"heart_rate": 95, "spo2": 98, "skin_temp": 34.2, "steps": 4200}` |
 | `POST /api/scenario` | `{"name": "rest" \| "walk" \| "run_sun"}` switches the live demo scenario |
@@ -126,14 +125,14 @@ Optional environment variables: `LAT` / `LON` (location, default Athens) and `CH
 ├── healthMonitor.py    # health analysis engine (reference ranges, score, trends, radiation canary)
 ├── smartwatch.py       # smartwatch export reader (Apple Health / CSV / JSON) with simulated fallback
 ├── UserInt.py          # user profile + desktop UI (PySide6 / console)
+├── radiation_detector.py # memory bit-flip radiation detector (SEU counting, Poisson/Bayes probability)
 ├── health_log.csv      # history of health checks (used for trends)
 └── chatbox/            # web app
     ├── app.py          # FastAPI backend: NASA POWER, live simulator, risk score, health API, chat
     ├── requirements.txt
     ├── .env.example    # template for the API key (the real .env is git-ignored)
     └── static/
-        ├── dashboard.html  # main dashboard (vanilla HTML/CSS/JS, no build step)
-        └── chat.html       # standalone chat box
+        └── dashboard.html  # main dashboard with the built-in chat (vanilla HTML/CSS/JS, no build step)
 ```
 
 ## Use of Artificial Intelligence
