@@ -24,16 +24,19 @@ import sys
 import tempfile
 import threading
 import time
+from collections import defaultdict, deque
 from datetime import date, timedelta
 from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from groq import Groq
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 load_dotenv(Path(__file__).parent / ".env")  # loads GROQ_API_KEY from .env
 
@@ -62,6 +65,61 @@ app.add_middleware(  # allow calls from a frontend on another origin
 
 STATIC = Path(__file__).parent / "static"
 
+
+
+# ----------------------------------------------------------- Rate limits ---
+# Simple in-memory limiter so nobody can spam the chatbot (and burn the Groq
+# quota) or hammer the heavy endpoints. (count, seconds) = at most `count`
+# requests per `seconds`, per visitor IP. Override with env vars if needed.
+RATE_RULES = {
+    "chat":      [(1, 4), (15, 600)],   # 1 message / 4 s and 15 / 10 min per visitor
+    "radiation": [(1, 10)],             # the scan allocates ~100 MB
+    "upload":    [(5, 600)],
+    "health":    [(10, 60)],            # Analyze / Re-read
+    "scenario":  [(10, 60)],
+    "vitals":    [(120, 60)],           # a real watch posting every ~0.5 s is fine
+}
+# All visitors together, kept under Groq's free limit of ~30 requests/minute.
+GLOBAL_CHAT = (int(os.getenv("CHAT_GLOBAL_PER_MIN", "25")), 60)
+MAX_MESSAGE_CHARS = 1000
+
+_hits: dict = defaultdict(deque)
+_rl_lock = threading.Lock()
+
+
+def client_ip(request: Request) -> str:
+    # Render sits behind a proxy, so the visitor's IP is the first X-Forwarded-For entry.
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def rate_limit(request: Request, action: str):
+    """Raise 429 with a Retry-After header if this visitor (or everyone) is too fast."""
+    now = time.time()
+    ip = client_ip(request)
+    rules = [(f"{action}:{ip}", n, w) for n, w in RATE_RULES[action]]
+    if action == "chat":
+        rules.append(("chat:global", *GLOBAL_CHAT))
+    with _rl_lock:
+        if len(_hits) > 20000:  # forget idle visitors so memory stays small
+            for k in [k for k, q in _hits.items() if not q or q[-1] < now - 600]:
+                del _hits[k]
+        wait, busy = 0.0, False
+        for key, n, w in rules:
+            q = _hits[(key, w)]
+            while q and q[0] <= now - w:
+                q.popleft()
+            if len(q) >= n:
+                wait = max(wait, q[0] + w - now)
+                busy = busy or key == "chat:global"
+        if wait > 0:
+            secs = max(1, math.ceil(wait))
+            msg = "The assistant is busy right now" if busy else "Slow down a little"
+            raise HTTPException(429, f"{msg}: try again in {secs} s.", headers={"Retry-After": str(secs)})
+        for key, n, w in rules:
+            _hits[(key, w)].append(now)
 
 # ---------------------------------------------------------------- Vitals ----
 class Vitals(BaseModel):
@@ -113,7 +171,8 @@ class Scenario(BaseModel):
 
 
 @app.post("/api/scenario")
-def set_scenario(s: Scenario):
+def set_scenario(s: Scenario, request: Request):
+    rate_limit(request, "scenario")
     if s.name not in SCENARIOS:
         raise HTTPException(400, f"Unknown scenario. Available: {list(SCENARIOS)}")
     sim["scenario"] = s.name
@@ -121,8 +180,9 @@ def set_scenario(s: Scenario):
 
 
 @app.post("/api/vitals")
-def post_vitals(v: Vitals):
+def post_vitals(v: Vitals, request: Request):
     global latest_vitals
+    rate_limit(request, "vitals")
     v.timestamp = v.timestamp or time.time()
     latest_vitals = v
     return {"ok": True}
@@ -306,8 +366,9 @@ class Profile(BaseModel):
 
 
 @app.post("/api/health/profile")
-def set_profile(p: Profile):
+def set_profile(p: Profile, request: Request):
     _require_health()
+    rate_limit(request, "health")
     with _health_lock:
         try:
             UserInt._apply(p.weight, p.height, p.bp, p.age, p.sex, p.activity)
@@ -317,8 +378,9 @@ def set_profile(p: Profile):
 
 
 @app.post("/api/health/reread")
-def reread_watch():
+def reread_watch(request: Request):
     _require_health()
+    rate_limit(request, "health")
     with _health_lock:
         return _rebuild(reread=True)
 
@@ -327,9 +389,10 @@ MAX_EXPORT_BYTES = 200 * 1024 * 1024
 
 
 @app.post("/api/health/upload")
-async def upload_export(file: UploadFile = File(...)):
+async def upload_export(request: Request, file: UploadFile = File(...)):
     """Load a smartwatch export (Apple Health .zip/.xml, .csv or .json) via smartwatch.py."""
     _require_health()
+    rate_limit(request, "upload")
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in (".zip", ".xml", ".csv", ".json"):
         raise HTTPException(400, "Unsupported file. Use .zip/.xml (Apple Health), .csv or .json")
@@ -356,10 +419,11 @@ class StormTest(BaseModel):
 
 
 @app.post("/api/health/radiation")
-def radiation_test(t: StormTest):
+def radiation_test(t: StormTest, request: Request):
     """Runs the team's RAM bit-flip 'canary' test (healthMonitor.run_radiation_test).
     'storm' > off deliberately corrupts cells first, as a demo."""
     _require_health()
+    rate_limit(request, "radiation")
     if t.storm not in UserInt.STORM_PRESETS:
         raise HTTPException(400, f"storm must be one of {list(UserInt.STORM_PRESETS)}")
     with _health_lock:
@@ -403,13 +467,13 @@ CURRENT DATA:
 
 
 class ChatMessage(BaseModel):
-    role: str      # "user" | "assistant"
-    content: str
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=4000)
 
 
 class ChatRequest(BaseModel):
-    message: str
-    history: list[ChatMessage] = []
+    message: str = Field(min_length=1, max_length=MAX_MESSAGE_CHARS)
+    history: list[ChatMessage] = Field(default=[], max_length=40)
 
 
 _client: Groq | None = None
@@ -425,7 +489,8 @@ def client() -> Groq:
 
 
 @app.post("/api/chat")
-def chat(req: ChatRequest):
+def chat(req: ChatRequest, request: Request):
+    rate_limit(request, "chat")
     ctx = get_context()
     if healthMonitor is not None:
         ctx["health_check"] = health_for_chat()

@@ -266,7 +266,7 @@
       <button>What does the UV index mean?</button>
     </div>
     <form class="input" id="form">
-      <input id="text" placeholder="Type a message…" autocomplete="off">
+      <input id="text" placeholder="Type a message…" autocomplete="off" maxlength="1000">
       <button id="send">➤</button>
     </form>
   </aside>
@@ -500,21 +500,44 @@ function addMsg(role, text, cls = "") {
   $("messages").appendChild(el); $("messages").scrollTop = $("messages").scrollHeight;
   return el;
 }
+// Cooldown between messages (the server enforces it too: 1 message / 4 s).
+const COOLDOWN_S = 4;
+let cooldownTimer = null;
+function startCooldown(secs) {
+  const btn = $("send");
+  clearInterval(cooldownTimer);
+  let left = Math.max(1, Math.ceil(secs));
+  btn.disabled = true; btn.textContent = left;
+  cooldownTimer = setInterval(() => {
+    left -= 1;
+    if (left <= 0) { clearInterval(cooldownTimer); btn.disabled = false; btn.textContent = "➤"; }
+    else btn.textContent = left;
+  }, 1000);
+}
+function errorText(res, data) {
+  if (typeof data.detail === "string") return data.detail;
+  if (res.status === 422) return "Message too long (max 1000 characters).";
+  return res.statusText || "Something went wrong.";
+}
 async function send(text) {
-  text = text.trim(); if (!text) return;
+  text = text.trim(); if (!text || $("send").disabled) return;
   $("suggestions").style.display = "none";
   addMsg("user", text); $("text").value = ""; $("send").disabled = true;
   const typing = addMsg("bot", ""); typing.classList.add("typing");
   typing.innerHTML = "<span></span><span></span><span></span>";
+  let cooldown = COOLDOWN_S;
   try {
     const res = await fetch(`${API}/api/chat`, { method: "POST", headers: { "Content-Type": "application/json" },
                                                  body: JSON.stringify({ message: text, history }) });
     const data = await res.json(); typing.remove();
-    if (!res.ok) throw new Error(data.detail || res.statusText);
+    if (!res.ok) {
+      cooldown = +(res.headers.get("Retry-After") || COOLDOWN_S);
+      throw new Error(errorText(res, data));
+    }
     addMsg("bot", data.reply);
     history.push({ role: "user", content: text }, { role: "assistant", content: data.reply });
   } catch (e) { typing.remove(); addMsg("bot", "⚠ " + e.message, "error"); }
-  finally { $("send").disabled = false; $("text").focus(); }
+  finally { startCooldown(cooldown); $("text").focus(); }
 }
 $("form").addEventListener("submit", e => { e.preventDefault(); send($("text").value); });
 $("suggestions").addEventListener("click", e => { if (e.target.tagName === "BUTTON") send(e.target.textContent); });
